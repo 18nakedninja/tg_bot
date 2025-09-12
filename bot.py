@@ -193,7 +193,6 @@ async def clear_webhook(app):
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
-    app.post_init = clear_webhook
 
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start), CommandHandler("admin", admin)],
@@ -204,4 +203,19 @@ def main():
             ],
             SELECT_QUANTITY: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen),
-                CallbackQueryHandler(admin_handler, pattern="^(list_products|add
+                CallbackQueryHandler(admin_handler, pattern="^(list_products|add_product|remove_product|last_orders|clear_orders)$")
+            ],
+            ADD_PRODUCT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name),
+                CallbackQueryHandler(admin_handler, pattern="^(list_products|add_product|remove_product|last_orders|clear_orders)$")
+            ],
+            REMOVE_PRODUCT: [
+                CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$"),
+                CallbackQueryHandler(admin_handler, pattern="^(list_products|add_product|remove_product|last_orders|clear_orders)$")
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    app.add_handler(conv)
+    app.run_polling()
