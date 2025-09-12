@@ -186,7 +186,10 @@ def main():
     )
 
     app.add_handler(conv_handler)
-    asyncio.run(run_bot(app))
+
+    # просто запускаем polling, PTB сам работает с уже запущенным event loop
+    logger.info("🚀 Бот запущен! Ожидаем команды...")
+    app.run_polling(poll_interval=2.0)
 
 if __name__ == "__main__":
     main()
