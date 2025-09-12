@@ -1,7 +1,7 @@
 import os
-import asyncio
 import psycopg2
 from psycopg2 import IntegrityError
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -9,9 +9,11 @@ from telegram.ext import (
 )
 
 # === НАСТРОЙКИ ===
-BOT_TOKEN = os.environ.get("BOT_TOKEN") or "8342478210:AAFd3jAdENjgZ52FHmcm3jtDhkP4rpfOJLg"
-ADMIN_ID = 472044641
+BOT_TOKEN = os.environ.get("8342478210:AAFd3jAdENjgZ52FHmcm3jtDhkP4rpfOJLg")
+if not BOT_TOKEN:
+    raise ValueError("❌ BOT_TOKEN не задан! Установи его в переменных окружения.")
 
+ADMIN_ID = 472044641
 CONTACT_LINK = "https://t.me/mobilike_com"
 
 # === STATES ===
@@ -25,7 +27,7 @@ EDIT_PRODUCT_NAME = 5
 # === DATABASE HELPERS ===
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL не задана!")
+    raise ValueError("❌ DATABASE_URL не задана!")
 
 def execute_query(query, params=None, fetch=False):
     conn = psycopg2.connect(DATABASE_URL)
@@ -45,7 +47,7 @@ def get_products():
     rows = execute_query("SELECT name FROM products ORDER BY id ASC", fetch=True)
     return [r[0] for r in rows]
 
-# === INITIALIZE TABLES ===
+# === CREATE TABLES ===
 execute_query("""
 CREATE TABLE IF NOT EXISTS products(
     id SERIAL PRIMARY KEY,
@@ -187,11 +189,7 @@ async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except IntegrityError:
         await update.message.reply_text("❌ Такой товар уже есть.")
         return ADD_PRODUCT
-    except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка БД: {e}")
-        return ADD_PRODUCT
     await update.message.reply_text(f"✅ Товар «{name}» добавлен!")
-    await asyncio.sleep(0.1)
     await show_admin_menu(update, context)
     return ConversationHandler.END
 
@@ -201,7 +199,6 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
     name = query.data.replace("delete_", "")
     execute_query("DELETE FROM products WHERE name=%s", (name,))
     await query.edit_message_text(f"🗑 Товар «{name}» удалён.")
-    await asyncio.sleep(0.1)
     await show_admin_menu(update, context)
     return ConversationHandler.END
 
@@ -224,7 +221,6 @@ async def edit_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Товар с таким названием уже существует.")
         return EDIT_PRODUCT_NAME
     await update.message.reply_text(f"✅ Товар «{old_name}» переименован в «{new_name}».")
-    await asyncio.sleep(0.1)
     await show_admin_menu(update, context)
     return ConversationHandler.END
 
