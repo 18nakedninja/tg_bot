@@ -85,6 +85,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id != ADMIN_ID:
         return
+    products = get_products()
     keyboard = [
         [InlineKeyboardButton("📋 Список товаров", callback_data="list_products")],
         [InlineKeyboardButton("➕ Добавить товар", callback_data="add_product")],
@@ -94,6 +95,7 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🖼 Загрузить обложку", callback_data="upload_media")]
     ]
     await update.message.reply_text("⚙️ Админ-меню:", reply_markup=InlineKeyboardMarkup(keyboard))
+    return ConversationHandler.END
 
 async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -145,7 +147,6 @@ async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not name:
         await update.message.reply_text("❌ Название товара не может быть пустым.")
         return ADD_PRODUCT
-
     try:
         cursor.execute("INSERT INTO products(name) VALUES (?)", (name,))
         conn.commit()
@@ -167,32 +168,21 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
-    async def post_init(application):
-        await application.bot.set_my_commands([
-            ("start", "Сделать заказ"),
-            ("cancel", "Отменить действие"),
-            ("admin", "Админ-меню"),
-        ])
-    app.post_init = post_init
-
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[CommandHandler("start", start),
+                      CommandHandler("admin", admin_menu)],
         states={
             SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
             SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
             ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
             REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
-            CONFIRM_CLEAR: [CallbackQueryHandler(lambda u,c: None, pattern="^confirm_clear_.*$")],  # здесь позже добавишь
-            WAIT_MEDIA: [MessageHandler(filters.ALL, lambda u,c: None)],  # обложка
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
     app.add_handler(conv_handler)
-    app.add_handler(CommandHandler("admin", admin_menu))
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
                                          pattern="^(list_products|add_product|remove_product|last_orders|clear_orders|upload_media)$"))
-
     app.run_polling()
 
 if __name__ == "__main__":
