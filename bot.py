@@ -1,6 +1,7 @@
 import os
+import asyncio
 import psycopg2
-from psycopg2 import IntegrityError
+from psycopg2 import IntegrityError, OperationalError
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -8,7 +9,7 @@ from telegram.ext import (
 )
 
 # === НАСТРОЙКИ ===
-BOT_TOKEN = "8342478210:AAFd3jAdENjgZ52FHmcm3jtDhkP4rpfOJLg"
+BOT_TOKEN = os.environ.get("BOT_TOKEN") or "ВАШ_BOT_TOKEN"
 ADMIN_ID = 472044641
 
 HEADER_IMAGE = "header.jpg"
@@ -31,10 +32,14 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL не задана!")
 
-conn = psycopg2.connect(DATABASE_URL)
-conn.autocommit = True
-cursor = conn.cursor()
+try:
+    conn = psycopg2.connect(DATABASE_URL)
+    conn.autocommit = True
+    cursor = conn.cursor()
+except OperationalError as e:
+    raise RuntimeError(f"Ошибка подключения к БД: {e}")
 
+# создаем таблицы, если их нет
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS products(
     id SERIAL PRIMARY KEY,
@@ -87,14 +92,19 @@ async def product_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return SELECT_QUANTITY
 
 async def quantity_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    product = context.user_data["product"]
+    product = context.user_data.get("product")
     quantity = update.message.text
     user = update.message.from_user
 
-    cursor.execute(
-        "INSERT INTO orders(user_id, username, product, quantity) VALUES (%s, %s, %s, %s)",
-        (str(user.id), user.username or "", product, quantity)
-    )
+    try:
+        cursor.execute(
+            "INSERT INTO orders(user_id, username, product, quantity) VALUES (%s, %s, %s, %s)",
+            (str(user.id), user.username or "", product, quantity)
+        )
+        conn.commit()
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка БД: {e}")
+        return ConversationHandler.END
 
     await update.message.reply_text(f"✅ Ваш заказ на {quantity} × {product} принят!")
     admin_message = f"📦 Новый заказ!\n👤 @{user.username or user.id}\n🛒 {product}\n🔢 Кол-во: {quantity}"
@@ -125,7 +135,7 @@ async def show_admin_menu(update_or_query, context):
 
 async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id != ADMIN_ID:
-        return
+        return ConversationHandler.END
     await show_admin_menu(update, context)
     return ConversationHandler.END
 
@@ -142,7 +152,8 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     elif data == "add_product":
         await query.edit_message_text("Введите название нового товара:")
-        return ADD_PRODUCT  # ✅ Обязательно возвращаем состояние
+        await asyncio.sleep(0.3)
+        return ADD_PRODUCT
 
     elif data == "remove_product":
         products = get_products()
@@ -185,17 +196,24 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # === ADD / EDIT / REMOVE PRODUCT ===
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    import asyncio
     name = update.message.text.strip()
     if not name:
         await update.message.reply_text("❌ Название товара не может быть пустым.")
         return ADD_PRODUCT
     try:
         cursor.execute("INSERT INTO products(name) VALUES (%s)", (name,))
+        conn.commit()
     except IntegrityError:
+        conn.rollback()
         await update.message.reply_text("❌ Такой товар уже есть.")
+        return ADD_PRODUCT
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка БД: {e}")
         return ADD_PRODUCT
 
     await update.message.reply_text(f"✅ Товар «{name}» добавлен!")
+    await asyncio.sleep(0.3)
     await show_admin_menu(update, context)
     return ConversationHandler.END
 
@@ -224,7 +242,9 @@ async def edit_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         cursor.execute("UPDATE products SET name=%s WHERE name=%s", (new_name, old_name))
+        conn.commit()
     except IntegrityError:
+        conn.rollback()
         await update.message.reply_text("❌ Товар с таким названием уже существует.")
         return EDIT_PRODUCT_NAME
 
