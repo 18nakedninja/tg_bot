@@ -1,77 +1,65 @@
 import os
-import time
-import logging
-import asyncio
 import psycopg2
 from psycopg2 import IntegrityError
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler, MessageHandler,
-    filters, ContextTypes, ConversationHandler
+    Application, CommandHandler, CallbackQueryHandler,
+    MessageHandler, filters, ContextTypes, ConversationHandler
 )
 
-# === ЛОГИ ===
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# ================= НАСТРОЙКИ =================
+# Вставь сюда токен твоего бота
+BOT_TOKEN = "8342478210:AAFd3jAdENjgZ52FHmcm3jtDhkP4rpfOJLg"
 
-# === НАСТРОЙКИ ===
-BOT_TOKEN = os.environ.get("BOT_TOKEN") or "8342478210:AAFd3jAdENjgZ52FHmcm3jtDhkP4rpfOJLg"
-ADMIN_ID = 472044641
+# Вставь сюда ID телеграма администратора (число)
+ADMIN_ID = 472044641  
 
+# Файлы для обложки / стартового медиа
 HEADER_IMAGE = "header.jpg"
 HEADER_VIDEO = "header.mp4"
 HEADER_GIF = "header.gif"
 CONTACT_LINK = "https://t.me/mobilike_com"
 
-# === STATES ===
-SELECT_PRODUCT, SELECT_QUANTITY, ADD_PRODUCT, REMOVE_PRODUCT, SELECT_PRODUCT_TO_EDIT, EDIT_PRODUCT_NAME = range(6)
+# ================= СОСТОЯНИЯ =================
+SELECT_PRODUCT, SELECT_QUANTITY, ADD_PRODUCT, REMOVE_PRODUCT, EDIT_PRODUCT_NAME = range(5)
 
-# === ПОДКЛЮЧЕНИЕ К POSTGRESQL ===
-DATABASE_URL = os.environ.get("DATABASE_URL")
+# ================= ПОДКЛЮЧЕНИЕ К БАЗЕ =================
+DATABASE_URL = os.environ.get("postgresql://postgres:bVUsvGYRNbUYqKNdntqqngMZUWZWpYSh@switchback.proxy.rlwy.net:51471/railway")  # Railway или локальный URL
+
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL не задана! Проверь переменные окружения на Railway.")
+    raise ValueError("DATABASE_URL не задан! Проверь переменные окружения на Railway.")
 
-MAX_RETRIES = 5
-for attempt in range(1, MAX_RETRIES + 1):
-    try:
-        conn = psycopg2.connect(DATABASE_URL)
-        cursor = conn.cursor()
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS products(
-            id SERIAL PRIMARY KEY,
-            name TEXT UNIQUE
-        )
-        """)
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS orders(
-            id SERIAL PRIMARY KEY,
-            user_id TEXT,
-            username TEXT,
-            product TEXT,
-            quantity TEXT
-        )
-        """)
-        conn.commit()
-        logger.info("✅ Подключение к БД успешно, таблицы проверены/созданы.")
-        break
-    except Exception as e:
-        logger.warning(f"❌ Ошибка подключения к БД: {e}")
-        if attempt < MAX_RETRIES:
-            logger.info(f"⏳ Повторная попытка через 3 сек... (попытка {attempt}/{MAX_RETRIES})")
-            time.sleep(3)
-        else:
-            raise RuntimeError("❌ Не удалось подключиться к базе данных после нескольких попыток.")
+# Подключение к PostgreSQL
+conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+cursor = conn.cursor()
 
-# === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
+# Создание таблиц, если их нет
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS products(
+    id SERIAL PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL
+)
+""")
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS orders(
+    id SERIAL PRIMARY KEY,
+    user_id TEXT,
+    username TEXT,
+    product TEXT,
+    quantity TEXT
+)
+""")
+conn.commit()
+print("✅ Подключение к БД успешно, таблицы проверены/созданы.")
+
+# ================= ФУНКЦИИ =================
 def get_products():
     cursor.execute("SELECT name FROM products ORDER BY id ASC")
     return [row[0] for row in cursor.fetchall()]
 
-# === КЛИЕНТСКАЯ ЧАСТЬ ===
+# ============== КЛИЕНТСКАЯ ЧАСТЬ =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Отправляем медиа при старте
     if os.path.exists(HEADER_VIDEO):
         with open(HEADER_VIDEO, "rb") as v:
             await update.message.reply_video(v, caption="Выберите товар:")
@@ -102,7 +90,7 @@ async def product_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return SELECT_QUANTITY
 
 async def quantity_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    product = context.user_data["product"]
+    product = context.user_data.get("product")
     quantity = update.message.text
     user = update.message.from_user
 
@@ -121,22 +109,42 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Действие отменено.")
     return ConversationHandler.END
 
-# === АДМИН-МЕНЮ ===
+# ================== АДМИН ==================
 async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Только админ
     if update.message.from_user.id != ADMIN_ID:
         return
+
     keyboard = [
         [InlineKeyboardButton("📋 Список товаров", callback_data="list_products")],
         [InlineKeyboardButton("➕ Добавить товар", callback_data="add_product")],
         [InlineKeyboardButton("🗑 Удалить товар", callback_data="remove_product")],
-        [InlineKeyboardButton("✏️ Редактировать товар", callback_data="edit_product")],
-        [InlineKeyboardButton("📦 Последние заказы", callback_data="last_orders")],
-        [InlineKeyboardButton("🧹 Очистить заказы", callback_data="clear_orders")],
-        [InlineKeyboardButton("🖼 Загрузить обложку", callback_data="upload_media")]
     ]
-    await update.message.reply_text("⚙️ Админ-панель:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("⚙️ Админ-меню:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# === ДОБАВЛЕНИЕ / УДАЛЕНИЕ ТОВАРОВ ===
+async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data == "list_products":
+        products = get_products()
+        text = "📋 Список товаров:\n" + "\n".join(f"• {p}" for p in products) if products else "⚠️ Список пуст."
+        await query.edit_message_text(text)
+
+    elif data == "add_product":
+        await query.edit_message_text("✏️ Введите название нового товара:")
+        return ADD_PRODUCT
+
+    elif data == "remove_product":
+        products = get_products()
+        if not products:
+            await query.edit_message_text("⚠️ Список товаров пуст.")
+            return ConversationHandler.END
+        keyboard = [[InlineKeyboardButton(f"🗑 {p}", callback_data=f"delete_{p}")] for p in products]
+        await query.edit_message_text("Выберите товар для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return REMOVE_PRODUCT
+
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip()
     if not name:
@@ -160,20 +168,20 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
     await query.edit_message_text(f"🗑 Товар «{name}» удалён.")
     return ConversationHandler.END
 
-# === MAIN ===
+# ================== MAIN ==================
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start),
-                      CommandHandler("admin", admin_menu)],
+        entry_points=[
+            CommandHandler("start", start),
+            CommandHandler("admin", admin_menu)
+        ],
         states={
             SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
             SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
             ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
-            REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
-            SELECT_PRODUCT_TO_EDIT: [CallbackQueryHandler(select_product_to_edit, pattern="^edit_.*$")],
-            EDIT_PRODUCT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_name)],
+            REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")]
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         allow_reentry=True
@@ -181,7 +189,9 @@ def main():
 
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
-                                         pattern="^(list_products|add_product|remove_product|edit_product|last_orders|stats|admin_back)$"))
+                                         pattern="^(list_products|add_product|remove_product)$"))
+
+    print("🚀 Бот запущен! Ожидаем команды...")
     app.run_polling()
 
 if __name__ == "__main__":
