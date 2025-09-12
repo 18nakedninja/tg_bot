@@ -26,8 +26,10 @@ if not DATABASE_URL:
     raise ValueError("DATABASE_URL не задана!")
 
 conn = psycopg2.connect(DATABASE_URL)
+conn.autocommit = True
 cursor = conn.cursor()
 
+# Создаём таблицы, если их нет
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS products(
     id SERIAL PRIMARY KEY,
@@ -43,7 +45,6 @@ CREATE TABLE IF NOT EXISTS orders(
     quantity TEXT
 )
 """)
-conn.commit()
 
 def get_products():
     cursor.execute("SELECT name FROM products ORDER BY id ASC")
@@ -89,7 +90,6 @@ async def quantity_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "INSERT INTO orders(user_id, username, product, quantity) VALUES (%s, %s, %s, %s)",
         (str(user.id), user.username or "", product, quantity)
     )
-    conn.commit()
 
     await update.message.reply_text(f"✅ Ваш заказ на {quantity} × {product} принят!")
     admin_message = f"📦 Новый заказ!\n👤 @{user.username or user.id}\n🛒 {product}\n🔢 Кол-во: {quantity}"
@@ -210,9 +210,7 @@ async def edit_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         cursor.execute("UPDATE products SET name=%s WHERE name=%s", (new_name, old_name))
-        conn.commit()
     except IntegrityError:
-        conn.rollback()
         await update.message.reply_text("❌ Товар с таким названием уже существует.")
         return EDIT_PRODUCT_NAME
 
@@ -222,21 +220,22 @@ async def edit_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # === ADD / REMOVE PRODUCT ===
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        await update.message.reply_text("❌ Ошибка: нет текста.")
+        return ADD_PRODUCT
+
     name = update.message.text.strip()
     if not name:
         await update.message.reply_text("❌ Название товара не может быть пустым.")
-        return ADD_PRODUCT  # остаёмся в этом состоянии
+        return ADD_PRODUCT
 
     try:
         cursor.execute("INSERT INTO products(name) VALUES (%s)", (name,))
-        conn.commit()
-        await update.message.reply_text(f"✅ Товар «{name}» добавлен!")
     except IntegrityError:
-        conn.rollback()
         await update.message.reply_text("❌ Такой товар уже есть.")
-        return ADD_PRODUCT  # остаёмся в этом состоянии
+        return ADD_PRODUCT
 
-    # После успешного добавления возвращаем админ-панель
+    await update.message.reply_text(f"✅ Товар «{name}» добавлен!")
     await show_admin_menu(update, context)
     return ConversationHandler.END
 
@@ -245,9 +244,8 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
     await query.answer()
     name = query.data.replace("delete_", "")
     cursor.execute("DELETE FROM products WHERE name=%s", (name,))
-    conn.commit()
     await query.edit_message_text(f"🗑 Товар «{name}» удалён.")
-    await show_admin_menu(update, context)  # возвращаем админ-панель
+    await show_admin_menu(update, context)
     return ConversationHandler.END
 
 # === MAIN ===
@@ -265,12 +263,13 @@ def main():
             SELECT_PRODUCT_TO_EDIT: [CallbackQueryHandler(select_product_to_edit, pattern="^edit_.*$")],
             EDIT_PRODUCT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_name)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[CommandHandler("cancel", cancel)]
     )
 
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
-                                         pattern="^(list_products|add_product|remove_product|edit_product|last_orders|clear_orders|upload_media|stats|admin_back)$"))
+                                         pattern="^(list_products|add_product|remove_product|edit_product|last_orders|stats|clear_orders|upload_media|admin_back)$"))
+
     app.run_polling()
 
 if __name__ == "__main__":
