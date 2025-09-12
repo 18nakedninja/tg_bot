@@ -9,12 +9,9 @@ from telegram.ext import (
 )
 
 # === НАСТРОЙКИ ===
-BOT_TOKEN = os.environ.get("BOT_TOKEN") or "8342478210:AAFd3jAdENjgZ52FHmcm3jtDhkP4rpfOJLg"
+BOT_TOKEN = os.environ.get("BOT_TOKEN") or "ВАШ_BOT_TOKEN"
 ADMIN_ID = 472044641
 
-HEADER_IMAGE = "header.jpg"
-HEADER_VIDEO = "header.mp4"
-HEADER_GIF = "header.gif"
 CONTACT_LINK = "https://t.me/mobilike_com"
 
 # === STATES ===
@@ -67,23 +64,10 @@ CREATE TABLE IF NOT EXISTS orders(
 
 # === CLIENT SIDE ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if os.path.exists(HEADER_VIDEO):
-        with open(HEADER_VIDEO, "rb") as v:
-            await update.message.reply_video(v, caption="Выберите товар:")
-    elif os.path.exists(HEADER_GIF):
-        with open(HEADER_GIF, "rb") as g:
-            await update.message.reply_animation(g, caption="Выберите товар:")
-    elif os.path.exists(HEADER_IMAGE):
-        with open(HEADER_IMAGE, "rb") as img:
-            await update.message.reply_photo(img, caption="Выберите товар:")
-    else:
-        await update.message.reply_text("Выберите товар:")
-
     products = get_products()
     if not products:
         await update.message.reply_text("Список товаров пуст. Администратор должен его заполнить.")
         return ConversationHandler.END
-
     keyboard = [[InlineKeyboardButton(p, callback_data=p)] for p in products]
     keyboard.append([InlineKeyboardButton("📞 Связаться", url=CONTACT_LINK)])
     await update.message.reply_text("🛒 Список товаров:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -111,8 +95,8 @@ async def quantity_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     await update.message.reply_text(f"✅ Ваш заказ на {quantity} × {product} принят!")
-    admin_message = f"📦 Новый заказ!\n👤 @{user.username or user.id}\n🛒 {product}\n🔢 Кол-во: {quantity}"
-    await context.bot.send_message(chat_id=ADMIN_ID, text=admin_message)
+    await context.bot.send_message(chat_id=ADMIN_ID,
+                                   text=f"📦 Новый заказ!\n👤 @{user.username or user.id}\n🛒 {product}\n🔢 Кол-во: {quantity}")
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -207,7 +191,7 @@ async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Ошибка БД: {e}")
         return ADD_PRODUCT
     await update.message.reply_text(f"✅ Товар «{name}» добавлен!")
-    await asyncio.sleep(0.2)
+    await asyncio.sleep(0.1)
     await show_admin_menu(update, context)
     return ConversationHandler.END
 
@@ -217,6 +201,7 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
     name = query.data.replace("delete_", "")
     execute_query("DELETE FROM products WHERE name=%s", (name,))
     await query.edit_message_text(f"🗑 Товар «{name}» удалён.")
+    await asyncio.sleep(0.1)
     await show_admin_menu(update, context)
     return ConversationHandler.END
 
@@ -239,6 +224,7 @@ async def edit_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Товар с таким названием уже существует.")
         return EDIT_PRODUCT_NAME
     await update.message.reply_text(f"✅ Товар «{old_name}» переименован в «{new_name}».")
+    await asyncio.sleep(0.1)
     await show_admin_menu(update, context)
     return ConversationHandler.END
 
