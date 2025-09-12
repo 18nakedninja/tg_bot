@@ -17,8 +17,14 @@ HEADER_GIF = "header.gif"
 CONTACT_LINK = "https://t.me/mobilike_com"
 
 # === STATES ===
-SELECT_PRODUCT, SELECT_QUANTITY, ADD_PRODUCT, REMOVE_PRODUCT, CONFIRM_CLEAR, WAIT_MEDIA = range(6)
-SELECT_PRODUCT_TO_EDIT, EDIT_PRODUCT_NAME = range(6, 8)
+SELECT_PRODUCT = 0
+SELECT_QUANTITY = 1
+ADD_PRODUCT = 2
+REMOVE_PRODUCT = 3
+CONFIRM_CLEAR = 4
+WAIT_MEDIA = 5
+SELECT_PRODUCT_TO_EDIT = 6
+EDIT_PRODUCT_NAME = 7
 
 # === DATABASE ===
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -182,48 +188,11 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         ]
         await query.edit_message_text("⚠️ Ты уверен, что хочешь удалить все заказы?", reply_markup=InlineKeyboardMarkup(keyboard))
 
-    elif data == "upload_media":
-        await query.edit_message_text("📸 Пришли фото, видео или gif, которое будет обложкой при /start.")
-        return WAIT_MEDIA
-
     elif data == "admin_back":
         await show_admin_menu(query, context)
 
-# === EDIT PRODUCT ===
-async def select_product_to_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    context.user_data["edit_product"] = query.data.replace("edit_", "")
-    await query.edit_message_text(f"✏️ Введите новое имя для товара «{context.user_data['edit_product']}»:")
-    return EDIT_PRODUCT_NAME
-
-async def edit_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    new_name = update.message.text.strip()
-    old_name = context.user_data.get("edit_product")
-    if not old_name:
-        await update.message.reply_text("⚠️ Ошибка: не выбран товар.")
-        return ConversationHandler.END
-
-    if not new_name:
-        await update.message.reply_text("❌ Название не может быть пустым.")
-        return EDIT_PRODUCT_NAME
-
-    try:
-        cursor.execute("UPDATE products SET name=%s WHERE name=%s", (new_name, old_name))
-    except IntegrityError:
-        await update.message.reply_text("❌ Товар с таким названием уже существует.")
-        return EDIT_PRODUCT_NAME
-
-    await update.message.reply_text(f"✅ Товар «{old_name}» переименован в «{new_name}».")
-    await show_admin_menu(update, context)
-    return ConversationHandler.END
-
-# === ADD / REMOVE PRODUCT ===
+# === ADD / EDIT / REMOVE PRODUCT HANDLERS ===
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
-        await update.message.reply_text("❌ Ошибка: нет текста.")
-        return ADD_PRODUCT
-
     name = update.message.text.strip()
     if not name:
         await update.message.reply_text("❌ Название товара не может быть пустым.")
@@ -245,6 +214,30 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
     name = query.data.replace("delete_", "")
     cursor.execute("DELETE FROM products WHERE name=%s", (name,))
     await query.edit_message_text(f"🗑 Товар «{name}» удалён.")
+    await show_admin_menu(update, context)
+    return ConversationHandler.END
+
+async def select_product_to_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data["edit_product"] = query.data.replace("edit_", "")
+    await query.edit_message_text(f"✏️ Введите новое имя для товара «{context.user_data['edit_product']}»:")
+    return EDIT_PRODUCT_NAME
+
+async def edit_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    new_name = update.message.text.strip()
+    old_name = context.user_data.get("edit_product")
+    if not old_name or not new_name:
+        await update.message.reply_text("❌ Ошибка: неверное имя.")
+        return EDIT_PRODUCT_NAME
+
+    try:
+        cursor.execute("UPDATE products SET name=%s WHERE name=%s", (new_name, old_name))
+    except IntegrityError:
+        await update.message.reply_text("❌ Товар с таким названием уже существует.")
+        return EDIT_PRODUCT_NAME
+
+    await update.message.reply_text(f"✅ Товар «{old_name}» переименован в «{new_name}».")
     await show_admin_menu(update, context)
     return ConversationHandler.END
 
