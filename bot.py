@@ -218,6 +218,7 @@ def main():
             REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        per_message=True
     )
 
     app.add_handler(conv_handler)
