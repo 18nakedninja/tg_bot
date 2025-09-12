@@ -22,7 +22,7 @@ def load_products():
     if os.path.exists(PRODUCTS_FILE):
         with open(PRODUCTS_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return ["Товар 1", "Товар 2", "Товар 3"]
+    return []
 
 def save_products(products):
     with open(PRODUCTS_FILE, "w", encoding="utf-8") as f:
