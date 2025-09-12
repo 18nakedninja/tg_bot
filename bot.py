@@ -17,7 +17,69 @@ HEADER_GIF = "header.gif"
 CONTACT_LINK = "https://t.me/mobilike_com"
 
 # === STATES ===
-SELECT_PRODUCT, SELECT_QUANTITY, ADD_PRODUCT, REMOVE_PRODUCT, CONFIRM_CLEAR, WAIT_MEDIA = range(6)
+SELECT_PRODUCT, SELECT_QUANTITY, ADD_PRODUCT, REMOVE_PRODUCT, CONFIRM_CLEAR, WAIT_MEDIA, EDIT_PRODUCT = range(7)
+
+# === АДМИН-МЕНЮ ===
+async def show_admin_menu(update_or_query, context):
+    keyboard = [
+        [InlineKeyboardButton("📋 Список товаров", callback_data="list_products")],
+        [InlineKeyboardButton("➕ Добавить товар", callback_data="add_product")],
+        [InlineKeyboardButton("🗑 Удалить товар", callback_data="remove_product")],
+        [InlineKeyboardButton("✏️ Редактировать товар", callback_data="edit_product")],
+        [InlineKeyboardButton("📦 Последние заказы", callback_data="last_orders")],
+        [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
+        [InlineKeyboardButton("🧹 Очистить заказы", callback_data="clear_orders")],
+        [InlineKeyboardButton("🖼 Загрузить обложку", callback_data="upload_media")]
+    ]
+
+    text = "⚙️ <b>Админ-панель</b>\n\nВыберите действие:"
+    if isinstance(update_or_query, Update):
+        await update_or_query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+    else:
+        await update_or_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data == "edit_product":
+        products = get_products()
+        if not products:
+            await query.edit_message_text("⚠️ Список товаров пуст.")
+            return ConversationHandler.END
+        keyboard = [[InlineKeyboardButton(f"✏️ {p}", callback_data=f"edit_{p}")] for p in products]
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="admin_back")])
+        await query.edit_message_text("Выберите товар для редактирования:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return EDIT_PRODUCT
+
+    # остальные обработчики остаются без изменений
+
+async def edit_product_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    old_name = query.data.replace("edit_", "")
+    context.user_data["edit_product"] = old_name
+    await query.edit_message_text(f"✏️ Введите новое имя для товара «{old_name}»:")
+    return EDIT_PRODUCT
+
+async def edit_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    new_name = update.message.text.strip()
+    old_name = context.user_data.get("edit_product")
+    if not old_name:
+        await update.message.reply_text("⚠️ Ошибка: не выбран товар.")
+        return ConversationHandler.END
+
+    if not new_name:
+        await update.message.reply_text("❌ Название не может быть пустым.")
+        return EDIT_PRODUCT
+
+    cursor.execute("UPDATE products SET name=%s WHERE name=%s", (new_name, old_name))
+    conn.commit()
+
+    await update.message.reply_text(f"✅ Товар «{old_name}» переименован в «{new_name}».")
+    await show_admin_menu(update, context)
+    return ConversationHandler.END
 
 # === ПОДКЛЮЧЕНИЕ К POSTGRESQL ===
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -188,17 +250,21 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start),
-                      CommandHandler("admin", admin_menu)],
-        states={
-            SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
-            SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
-            ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
-            REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
+conv_handler = ConversationHandler(
+    entry_points=[CommandHandler("start", start),
+                  CommandHandler("admin", admin_menu)],
+    states={
+        SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
+        SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
+        ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
+        REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
+        EDIT_PRODUCT: [
+            CallbackQueryHandler(edit_product_handler, pattern="^edit_.*$"),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_name)
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel)],
+)
 
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
