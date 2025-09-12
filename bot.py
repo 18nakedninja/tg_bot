@@ -181,30 +181,26 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # === ADD / REMOVE / EDIT PRODUCT ===
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        print("📥 [DEBUG] add_product_name вызван!")  # лог в Railway
         name = update.message.text.strip()
-        print(f"[DEBUG] add_product_name вызван, получили: {name}")  # лог в консоль
+        print(f"📥 [DEBUG] Пользователь ввёл: {name}")
 
         if not name:
             await update.message.reply_text("❌ Название товара не может быть пустым.")
             return ADD_PRODUCT
 
-        try:
-            execute_query("INSERT INTO products(name) VALUES (%s)", (name,))
-        except IntegrityError:
-            await update.message.reply_text("❌ Такой товар уже есть.")
-            return ADD_PRODUCT
-        except Exception as db_error:
-            print(f"[ERROR] Ошибка при добавлении товара: {db_error}")
-            await update.message.reply_text(f"❌ Ошибка БД: {db_error}")
-            return ADD_PRODUCT
+        # Пишем в базу
+        cursor.execute("INSERT INTO products(name) VALUES (%s)", (name,))
+        conn.commit()
+        print("✅ [DEBUG] Успешно добавили в БД")
 
         await update.message.reply_text(f"✅ Товар «{name}» добавлен!")
-        await show_admin_menu(update, context)
         return ConversationHandler.END
 
     except Exception as e:
-        print(f"[CRITICAL] add_product_name упал: {e}")
-        await update.message.reply_text(f"❌ Критическая ошибка: {e}")
+        conn.rollback()
+        print(f"❌ [DEBUG] Ошибка при добавлении товара: {e}")
+        await update.message.reply_text(f"❌ Ошибка при добавлении: {e}")
         return ConversationHandler.END
 
 async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -242,31 +238,23 @@ async def edit_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
-    conv_handler = ConversationHandler(
-        entry_points=[
-            CommandHandler("start", start),
-            CommandHandler("admin", admin_menu)
-        ],
-        states={
-            SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
-            SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
-            ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
-            REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
-            SELECT_PRODUCT_TO_EDIT: [CallbackQueryHandler(select_product_to_edit, pattern="^edit_.*$")],
-            EDIT_PRODUCT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_name)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-        allow_reentry=True,
-        per_message=True  # ✅ добавляем, чтобы отлавливать ввод текста
-    )
-
-    app.add_handler(conv_handler)
-    app.add_handler(
-        CallbackQueryHandler(
-            admin_menu_handler,
-            pattern="^(list_products|add_product|remove_product|edit_product|last_orders|stats|admin_back)$"
-        )
-    )
+conv_handler = ConversationHandler(
+    entry_points=[
+        CommandHandler("start", start),
+        CommandHandler("admin", admin_menu)
+    ],
+    states={
+        SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
+        SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
+        ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
+        REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
+        SELECT_PRODUCT_TO_EDIT: [CallbackQueryHandler(select_product_to_edit, pattern="^edit_.*$")],
+        EDIT_PRODUCT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_name)],
+    },
+    fallbacks=[CommandHandler("cancel", cancel)],
+    allow_reentry=True,
+    per_message=True  # ✅ Обязательно
+)
 
     app.run_polling()
 
