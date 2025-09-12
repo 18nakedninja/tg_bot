@@ -217,18 +217,19 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(BOT_TOKEN).read_timeout(30).write_timeout(30).build()
 
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start),
-                      CommandHandler("admin", admin_menu)],
-        states={
-            SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
-            SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
-            ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
-            REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-        per_message=True  # ✅ Теперь ConversationHandler отслеживает каждое сообщение
-    )
+ conv_handler = ConversationHandler(
+    entry_points=[CommandHandler("start", start),
+                  CommandHandler("admin", admin_menu)],
+    states={
+        SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
+        SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
+        ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
+        REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
+    },
+    fallbacks=[CommandHandler("cancel", cancel)],
+    per_chat=True  # ✅ вернули обратно
+ )
+
 
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
