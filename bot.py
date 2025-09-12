@@ -1,7 +1,7 @@
 import os
 import asyncio
 import psycopg2
-from psycopg2 import IntegrityError, OperationalError
+from psycopg2 import pool, IntegrityError, OperationalError
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -9,7 +9,7 @@ from telegram.ext import (
 )
 
 # === НАСТРОЙКИ ===
-BOT_TOKEN = os.environ.get("BOT_TOKEN") or "ВАШ_BOT_TOKEN"
+BOT_TOKEN = os.environ.get("BOT_TOKEN") or "8342478210:AAFd3jAdENjgZ52FHmcm3jtDhkP4rpfOJLg"
 ADMIN_ID = 472044641
 
 HEADER_IMAGE = "header.jpg"
@@ -27,26 +27,42 @@ WAIT_MEDIA = 5
 SELECT_PRODUCT_TO_EDIT = 6
 EDIT_PRODUCT_NAME = 7
 
-# === DATABASE ===
+# === CONNECTION POOL ===
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL не задана!")
 
-try:
-    conn = psycopg2.connect(DATABASE_URL)
-    conn.autocommit = True
-    cursor = conn.cursor()
-except OperationalError as e:
-    raise RuntimeError(f"Ошибка подключения к БД: {e}")
+db_pool = pool.SimpleConnectionPool(
+    1, 10, dsn=DATABASE_URL
+)
 
-# создаем таблицы, если их нет
-cursor.execute("""
+# === DATABASE HELPERS ===
+def execute_query(query, params=None, fetch=False):
+    conn = db_pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            if fetch:
+                return cur.fetchall()
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        db_pool.putconn(conn)
+
+def get_products():
+    rows = execute_query("SELECT name FROM products ORDER BY id ASC", fetch=True)
+    return [r[0] for r in rows]
+
+# === INITIALIZE TABLES ===
+execute_query("""
 CREATE TABLE IF NOT EXISTS products(
     id SERIAL PRIMARY KEY,
     name TEXT UNIQUE
 )
 """)
-cursor.execute("""
+execute_query("""
 CREATE TABLE IF NOT EXISTS orders(
     id SERIAL PRIMARY KEY,
     user_id TEXT,
@@ -55,10 +71,6 @@ CREATE TABLE IF NOT EXISTS orders(
     quantity TEXT
 )
 """)
-
-def get_products():
-    cursor.execute("SELECT name FROM products ORDER BY id ASC")
-    return [row[0] for row in cursor.fetchall()]
 
 # === CLIENT SIDE ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -97,11 +109,10 @@ async def quantity_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
 
     try:
-        cursor.execute(
+        execute_query(
             "INSERT INTO orders(user_id, username, product, quantity) VALUES (%s, %s, %s, %s)",
             (str(user.id), user.username or "", product, quantity)
         )
-        conn.commit()
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка БД: {e}")
         return ConversationHandler.END
@@ -176,17 +187,14 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return SELECT_PRODUCT_TO_EDIT
 
     elif data == "last_orders":
-        cursor.execute("SELECT user_id, username, product, quantity FROM orders ORDER BY id DESC LIMIT 5")
-        orders = cursor.fetchall()
+        orders = execute_query("SELECT user_id, username, product, quantity FROM orders ORDER BY id DESC LIMIT 5", fetch=True)
         text = "📦 Последние заказы:\n\n" + "".join(f"👤 @{u[1] or u[0]}: {u[3]} × {u[2]}\n" for u in orders) if orders else "📦 Заказов пока нет."
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin_back")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif data == "stats":
-        cursor.execute("SELECT COUNT(*) FROM orders")
-        total_orders = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM products")
-        total_products = cursor.fetchone()[0]
+        total_orders = execute_query("SELECT COUNT(*) FROM orders", fetch=True)[0][0]
+        total_products = execute_query("SELECT COUNT(*) FROM products", fetch=True)[0][0]
         text = f"📊 Статистика:\n📦 Заказов: {total_orders}\n📋 Товаров: {total_products}"
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin_back")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -202,16 +210,10 @@ async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Название товара не может быть пустым.")
         return ADD_PRODUCT
     try:
-        cursor.execute("INSERT INTO products(name) VALUES (%s)", (name,))
-        conn.commit()
+        execute_query("INSERT INTO products(name) VALUES (%s)", (name,))
     except IntegrityError:
-        conn.rollback()
         await update.message.reply_text("❌ Такой товар уже есть.")
         return ADD_PRODUCT
-    except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка БД: {e}")
-        return ADD_PRODUCT
-
     await update.message.reply_text(f"✅ Товар «{name}» добавлен!")
     await asyncio.sleep(0.3)
     await show_admin_menu(update, context)
@@ -221,7 +223,7 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     await query.answer()
     name = query.data.replace("delete_", "")
-    cursor.execute("DELETE FROM products WHERE name=%s", (name,))
+    execute_query("DELETE FROM products WHERE name=%s", (name,))
     await query.edit_message_text(f"🗑 Товар «{name}» удалён.")
     await show_admin_menu(query, context)
     return ConversationHandler.END
@@ -239,15 +241,11 @@ async def edit_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not old_name or not new_name:
         await update.message.reply_text("❌ Ошибка: неверное имя.")
         return EDIT_PRODUCT_NAME
-
     try:
-        cursor.execute("UPDATE products SET name=%s WHERE name=%s", (new_name, old_name))
-        conn.commit()
+        execute_query("UPDATE products SET name=%s WHERE name=%s", (new_name, old_name))
     except IntegrityError:
-        conn.rollback()
         await update.message.reply_text("❌ Товар с таким названием уже существует.")
         return EDIT_PRODUCT_NAME
-
     await update.message.reply_text(f"✅ Товар «{old_name}» переименован в «{new_name}».")
     await show_admin_menu(update, context)
     return ConversationHandler.END
