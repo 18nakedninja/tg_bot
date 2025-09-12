@@ -1,5 +1,5 @@
 import os
-import sqlite3
+import psycopg2
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -9,7 +9,6 @@ from telegram.ext import (
 # === НАСТРОЙКИ ===
 BOT_TOKEN = "743563203:AAHwP9ZkApgJc8BPBZpLMuvaJT_vNs1ja-s"
 ADMIN_ID = 472044641
-DB_FILE = "bot.db"
 
 HEADER_IMAGE = "header.jpg"
 HEADER_VIDEO = "header.mp4"
@@ -19,11 +18,27 @@ CONTACT_LINK = "https://t.me/mobilike_com"
 # === STATES ===
 SELECT_PRODUCT, SELECT_QUANTITY, ADD_PRODUCT, REMOVE_PRODUCT, CONFIRM_CLEAR, WAIT_MEDIA = range(6)
 
-# === БАЗА ДАННЫХ ===
-conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+# === ПОДКЛЮЧЕНИЕ К POSTGRESQL ===
+DATABASE_URL = os.environ.get("DATABASE_URL")
+conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
-cursor.execute("CREATE TABLE IF NOT EXISTS products(id INTEGER PRIMARY KEY, name TEXT UNIQUE)")
-cursor.execute("CREATE TABLE IF NOT EXISTS orders(id INTEGER PRIMARY KEY, user_id TEXT, username TEXT, product TEXT, quantity TEXT)")
+
+# создаём таблицы, если их нет
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS products(
+    id SERIAL PRIMARY KEY,
+    name TEXT UNIQUE
+)
+""")
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS orders(
+    id SERIAL PRIMARY KEY,
+    user_id TEXT,
+    username TEXT,
+    product TEXT,
+    quantity TEXT
+)
+""")
 conn.commit()
 
 def get_products():
@@ -67,7 +82,7 @@ async def quantity_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
 
     cursor.execute(
-        "INSERT INTO orders(user_id, username, product, quantity) VALUES (?, ?, ?, ?)",
+        "INSERT INTO orders(user_id, username, product, quantity) VALUES (%s, %s, %s, %s)",
         (str(user.id), user.username or "", product, quantity)
     )
     conn.commit()
@@ -148,10 +163,10 @@ async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Название товара не может быть пустым.")
         return ADD_PRODUCT
     try:
-        cursor.execute("INSERT INTO products(name) VALUES (?)", (name,))
+        cursor.execute("INSERT INTO products(name) VALUES (%s)", (name,))
         conn.commit()
         await update.message.reply_text(f"✅ Товар «{name}» добавлен!")
-    except sqlite3.IntegrityError:
+    except:
         await update.message.reply_text("❌ Такой товар уже есть.")
     return ConversationHandler.END
 
@@ -159,7 +174,7 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     await query.answer()
     name = query.data.replace("delete_", "")
-    cursor.execute("DELETE FROM products WHERE name = ?", (name,))
+    cursor.execute("DELETE FROM products WHERE name=%s", (name,))
     conn.commit()
     await query.edit_message_text(f"🗑 Товар «{name}» удалён.")
     return ConversationHandler.END
