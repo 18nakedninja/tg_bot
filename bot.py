@@ -35,7 +35,6 @@ conn = psycopg2.connect(DATABASE_URL)
 conn.autocommit = True
 cursor = conn.cursor()
 
-# Создаём таблицы, если их нет
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS products(
     id SERIAL PRIMARY KEY,
@@ -143,7 +142,7 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     elif data == "add_product":
         await query.edit_message_text("Введите название нового товара:")
-        return ADD_PRODUCT
+        return ADD_PRODUCT  # ✅ Обязательно возвращаем состояние
 
     elif data == "remove_product":
         products = get_products()
@@ -181,23 +180,15 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin_back")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
-    elif data == "clear_orders":
-        keyboard = [
-            [InlineKeyboardButton("✅ Да, очистить", callback_data="confirm_clear_yes")],
-            [InlineKeyboardButton("❌ Отмена", callback_data="admin_back")]
-        ]
-        await query.edit_message_text("⚠️ Ты уверен, что хочешь удалить все заказы?", reply_markup=InlineKeyboardMarkup(keyboard))
-
     elif data == "admin_back":
         await show_admin_menu(query, context)
 
-# === ADD / EDIT / REMOVE PRODUCT HANDLERS ===
+# === ADD / EDIT / REMOVE PRODUCT ===
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip()
     if not name:
         await update.message.reply_text("❌ Название товара не может быть пустым.")
         return ADD_PRODUCT
-
     try:
         cursor.execute("INSERT INTO products(name) VALUES (%s)", (name,))
     except IntegrityError:
@@ -214,7 +205,7 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
     name = query.data.replace("delete_", "")
     cursor.execute("DELETE FROM products WHERE name=%s", (name,))
     await query.edit_message_text(f"🗑 Товар «{name}» удалён.")
-    await show_admin_menu(update, context)
+    await show_admin_menu(query, context)
     return ConversationHandler.END
 
 async def select_product_to_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -256,13 +247,13 @@ def main():
             SELECT_PRODUCT_TO_EDIT: [CallbackQueryHandler(select_product_to_edit, pattern="^edit_.*$")],
             EDIT_PRODUCT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_name)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)]
+        fallbacks=[CommandHandler("cancel", cancel)],
+        allow_reentry=True
     )
 
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
-                                         pattern="^(list_products|add_product|remove_product|edit_product|last_orders|stats|clear_orders|upload_media|admin_back)$"))
-
+                                         pattern="^(list_products|add_product|remove_product|edit_product|last_orders|stats|admin_back)$"))
     app.run_polling()
 
 if __name__ == "__main__":
