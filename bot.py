@@ -9,8 +9,7 @@ from telegram.ext import (
 # === НАСТРОЙКИ ===
 BOT_TOKEN = "743563203:AAHwP9ZkApgJc8BPBZpLMuvaJT_vNs1ja-s"
 ADMIN_ID = 472044641
-
-DB_FILE = "bot.db"  # база в рабочей директории Railway
+DB_FILE = "bot.db"
 
 HEADER_IMAGE = "header.jpg"
 HEADER_VIDEO = "header.mp4"
@@ -23,25 +22,15 @@ SELECT_PRODUCT, SELECT_QUANTITY, ADD_PRODUCT, REMOVE_PRODUCT, CONFIRM_CLEAR, WAI
 # === БАЗА ДАННЫХ ===
 conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 cursor = conn.cursor()
-
-cursor.execute("""CREATE TABLE IF NOT EXISTS products(
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE
-)""")
-cursor.execute("""CREATE TABLE IF NOT EXISTS orders(
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT,
-    username TEXT,
-    product TEXT,
-    quantity TEXT
-)""")
+cursor.execute("CREATE TABLE IF NOT EXISTS products(id INTEGER PRIMARY KEY, name TEXT UNIQUE)")
+cursor.execute("CREATE TABLE IF NOT EXISTS orders(id INTEGER PRIMARY KEY, user_id TEXT, username TEXT, product TEXT, quantity TEXT)")
 conn.commit()
 
-# === ФУНКЦИИ ===
 def get_products():
     cursor.execute("SELECT name FROM products ORDER BY id ASC")
     return [row[0] for row in cursor.fetchall()]
 
+# === КЛИЕНТСКАЯ ЧАСТЬ ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if os.path.exists(HEADER_VIDEO):
         with open(HEADER_VIDEO, "rb") as v:
@@ -84,7 +73,6 @@ async def quantity_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
 
     await update.message.reply_text(f"✅ Ваш заказ на {quantity} × {product} принят!")
-
     admin_message = f"📦 Новый заказ!\n👤 @{user.username or user.id}\n🛒 {product}\n🔢 Кол-во: {quantity}"
     await context.bot.send_message(chat_id=ADMIN_ID, text=admin_message)
     return ConversationHandler.END
@@ -119,7 +107,7 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     elif data == "add_product":
         await query.edit_message_text("Введите название нового товара:")
-        return ADD_PRODUCT  # ✅ возвращаем состояние
+        return ADD_PRODUCT
 
     elif data == "remove_product":
         products = get_products()
@@ -128,7 +116,7 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return ConversationHandler.END
         keyboard = [[InlineKeyboardButton(f"🗑 {p}", callback_data=f"delete_{p}")] for p in products]
         await query.edit_message_text("Выберите товар для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
-        return REMOVE_PRODUCT  # ✅ возвращаем состояние
+        return REMOVE_PRODUCT
 
     elif data == "last_orders":
         cursor.execute("SELECT user_id, username, product, quantity FROM orders ORDER BY id DESC LIMIT 5")
@@ -157,11 +145,11 @@ async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not name:
         await update.message.reply_text("❌ Название товара не может быть пустым.")
         return ADD_PRODUCT
+
     try:
         cursor.execute("INSERT INTO products(name) VALUES (?)", (name,))
         conn.commit()
         await update.message.reply_text(f"✅ Товар «{name}» добавлен!")
-        print(f"[INFO] Added product: {name}")
     except sqlite3.IntegrityError:
         await update.message.reply_text("❌ Такой товар уже есть.")
     return ConversationHandler.END
@@ -175,44 +163,7 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
     await query.edit_message_text(f"🗑 Товар «{name}» удалён.")
     return ConversationHandler.END
 
-# === ОБЛОЖКА ===
-async def upload_media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.video:
-        file = await update.message.video.get_file()
-        await file.download_to_drive(HEADER_VIDEO)
-        if os.path.exists(HEADER_IMAGE): os.remove(HEADER_IMAGE)
-        if os.path.exists(HEADER_GIF): os.remove(HEADER_GIF)
-        await update.message.reply_text("✅ Видео обложка сохранена!")
-    elif update.message.animation:
-        file = await update.message.animation.get_file()
-        await file.download_to_drive(HEADER_GIF)
-        if os.path.exists(HEADER_IMAGE): os.remove(HEADER_IMAGE)
-        if os.path.exists(HEADER_VIDEO): os.remove(HEADER_VIDEO)
-        await update.message.reply_text("✅ GIF обложка сохранена!")
-    elif update.message.photo:
-        file = await update.message.photo[-1].get_file()
-        await file.download_to_drive(HEADER_IMAGE)
-        if os.path.exists(HEADER_VIDEO): os.remove(HEADER_VIDEO)
-        if os.path.exists(HEADER_GIF): os.remove(HEADER_GIF)
-        await update.message.reply_text("✅ Картинка обложка сохранена!")
-    else:
-        await update.message.reply_text("❌ Это не фото, видео или gif.")
-        return WAIT_MEDIA
-    return ConversationHandler.END
-
-# === ОЧИСТКА ЗАКАЗОВ ===
-async def clear_orders_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    if query.data == "confirm_clear_yes":
-        cursor.execute("DELETE FROM orders")
-        conn.commit()
-        await query.edit_message_text("🧹 Все заказы успешно удалены.")
-    else:
-        await query.edit_message_text("❌ Очистка отменена.")
-    return ConversationHandler.END
-
-# === MAIN ===
+# === ЗАПУСК ===
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
@@ -230,9 +181,9 @@ def main():
             SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
             SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
             ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
-            REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler)],
-            CONFIRM_CLEAR: [CallbackQueryHandler(clear_orders_confirm, pattern="^confirm_clear_.*$")],
-            WAIT_MEDIA: [MessageHandler(filters.ALL, upload_media_handler)],
+            REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
+            CONFIRM_CLEAR: [CallbackQueryHandler(lambda u,c: None, pattern="^confirm_clear_.*$")],  # здесь позже добавишь
+            WAIT_MEDIA: [MessageHandler(filters.ALL, lambda u,c: None)],  # обложка
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
