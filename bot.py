@@ -16,7 +16,7 @@ ORDERS_FILE = "orders.txt"
 HEADER_IMAGE = "header.jpg"
 HEADER_VIDEO = "header.mp4"
 HEADER_GIF = "header.gif"
-CONTACT_LINK = "https://t.me/YourUsername"  # <-- сюда ссылку на твой Telegram
+CONTACT_LINK = "https://t.me/mobilike_com"  # <-- сюда ссылку на твой Telegram
 
 def load_products():
     if os.path.exists(PRODUCTS_FILE):
