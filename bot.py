@@ -197,6 +197,16 @@ async def upload_media_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
+    async def post_init(application):
+        # Эта функция вызывается автоматически после старта приложения
+        await application.bot.set_my_commands([
+            ("start", "Сделать заказ"),
+            ("cancel", "Отменить действие"),
+            ("admin", "Админ-меню"),
+        ])
+
+    app.post_init = post_init
+
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -215,22 +225,8 @@ def main():
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
                                          pattern="^(list_products|add_product|remove_product|last_orders|clear_orders|upload_media)$"))
 
-    async def setup():
-        await app.bot.set_my_commands([
-            ("start", "Сделать заказ"),
-            ("cancel", "Отменить действие"),
-            ("admin", "Админ-меню"),
-        ])
-
-    async def run():
-        await setup()
-        await app.initialize()
-        await app.start()
-        await app.updater.start_polling()
-        await app.updater.idle()
-
-    import asyncio
-    asyncio.run(run())
+    # 🚀 Нормальный запуск без сложных asyncio.run()
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
