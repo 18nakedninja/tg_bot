@@ -215,28 +215,27 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 # === ЗАПУСК ===
 def main():
-    app = Application.builder().token(BOT_TOKEN).read_timeout(30).write_timeout(30).build()
+    app = Application.builder().token(BOT_TOKEN).build()
 
- conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("start", start),
-                  CommandHandler("admin", admin_menu)],
-    states={
-        SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
-        SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
-        ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
-        REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
-    },
-    fallbacks=[CommandHandler("cancel", cancel)],
-    per_chat=True  # ✅ вернули обратно
- )
-
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", start),
+                      CommandHandler("admin", admin_menu)],
+        states={
+            SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
+            SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
+            ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
+            REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
 
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
                                          pattern="^(list_products|add_product|remove_product|last_orders|clear_orders|upload_media)$"))
-    app.add_error_handler(error_handler)
-
     app.run_polling()
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()
