@@ -17,79 +17,17 @@ HEADER_GIF = "header.gif"
 CONTACT_LINK = "https://t.me/mobilike_com"
 
 # === STATES ===
-SELECT_PRODUCT, SELECT_QUANTITY, ADD_PRODUCT, REMOVE_PRODUCT, CONFIRM_CLEAR, WAIT_MEDIA, EDIT_PRODUCT = range(7)
+SELECT_PRODUCT, SELECT_QUANTITY, ADD_PRODUCT, REMOVE_PRODUCT, CONFIRM_CLEAR, WAIT_MEDIA = range(6)
+SELECT_PRODUCT_TO_EDIT, EDIT_PRODUCT_NAME = range(6, 8)
 
-# === АДМИН-МЕНЮ ===
-async def show_admin_menu(update_or_query, context):
-    keyboard = [
-        [InlineKeyboardButton("📋 Список товаров", callback_data="list_products")],
-        [InlineKeyboardButton("➕ Добавить товар", callback_data="add_product")],
-        [InlineKeyboardButton("🗑 Удалить товар", callback_data="remove_product")],
-        [InlineKeyboardButton("✏️ Редактировать товар", callback_data="edit_product")],
-        [InlineKeyboardButton("📦 Последние заказы", callback_data="last_orders")],
-        [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
-        [InlineKeyboardButton("🧹 Очистить заказы", callback_data="clear_orders")],
-        [InlineKeyboardButton("🖼 Загрузить обложку", callback_data="upload_media")]
-    ]
-
-    text = "⚙️ <b>Админ-панель</b>\n\nВыберите действие:"
-    if isinstance(update_or_query, Update):
-        await update_or_query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-    else:
-        await update_or_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-
-async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-
-    if data == "edit_product":
-        products = get_products()
-        if not products:
-            await query.edit_message_text("⚠️ Список товаров пуст.")
-            return ConversationHandler.END
-        keyboard = [[InlineKeyboardButton(f"✏️ {p}", callback_data=f"edit_{p}")] for p in products]
-        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="admin_back")])
-        await query.edit_message_text("Выберите товар для редактирования:", reply_markup=InlineKeyboardMarkup(keyboard))
-        return EDIT_PRODUCT
-
-    # остальные обработчики остаются без изменений
-
-async def edit_product_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    old_name = query.data.replace("edit_", "")
-    context.user_data["edit_product"] = old_name
-    await query.edit_message_text(f"✏️ Введите новое имя для товара «{old_name}»:")
-    return EDIT_PRODUCT
-
-async def edit_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    new_name = update.message.text.strip()
-    old_name = context.user_data.get("edit_product")
-    if not old_name:
-        await update.message.reply_text("⚠️ Ошибка: не выбран товар.")
-        return ConversationHandler.END
-
-    if not new_name:
-        await update.message.reply_text("❌ Название не может быть пустым.")
-        return EDIT_PRODUCT
-
-    cursor.execute("UPDATE products SET name=%s WHERE name=%s", (new_name, old_name))
-    conn.commit()
-
-    await update.message.reply_text(f"✅ Товар «{old_name}» переименован в «{new_name}».")
-    await show_admin_menu(update, context)
-    return ConversationHandler.END
-
-# === ПОДКЛЮЧЕНИЕ К POSTGRESQL ===
+# === DATABASE ===
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL не задана! Проверь переменные окружения на Railway.")
+    raise ValueError("DATABASE_URL не задана!")
 
 conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
 
-# создаём таблицы, если их нет
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS products(
     id SERIAL PRIMARY KEY,
@@ -111,7 +49,7 @@ def get_products():
     cursor.execute("SELECT name FROM products ORDER BY id ASC")
     return [row[0] for row in cursor.fetchall()]
 
-# === КЛИЕНТСКАЯ ЧАСТЬ ===
+# === CLIENT SIDE ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if os.path.exists(HEADER_VIDEO):
         with open(HEADER_VIDEO, "rb") as v:
@@ -162,20 +100,28 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Действие отменено.")
     return ConversationHandler.END
 
-# === АДМИН-МЕНЮ ===
-async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.from_user.id != ADMIN_ID:
-        return
-    products = get_products()
+# === ADMIN PANEL ===
+async def show_admin_menu(update_or_query, context):
     keyboard = [
         [InlineKeyboardButton("📋 Список товаров", callback_data="list_products")],
         [InlineKeyboardButton("➕ Добавить товар", callback_data="add_product")],
         [InlineKeyboardButton("🗑 Удалить товар", callback_data="remove_product")],
+        [InlineKeyboardButton("✏️ Редактировать товар", callback_data="edit_product")],
         [InlineKeyboardButton("📦 Последние заказы", callback_data="last_orders")],
+        [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
         [InlineKeyboardButton("🧹 Очистить заказы", callback_data="clear_orders")],
         [InlineKeyboardButton("🖼 Загрузить обложку", callback_data="upload_media")]
     ]
-    await update.message.reply_text("⚙️ Админ-меню:", reply_markup=InlineKeyboardMarkup(keyboard))
+    text = "⚙️ <b>Админ-панель</b>\n\nВыберите действие:"
+    if isinstance(update_or_query, Update):
+        await update_or_query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+    else:
+        await update_or_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.from_user.id != ADMIN_ID:
+        return
+    await show_admin_menu(update, context)
     return ConversationHandler.END
 
 async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -186,7 +132,8 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if data == "list_products":
         products = get_products()
         text = "📋 Список товаров:\n" + "\n".join(f"• {p}" for p in products) if products else "⚠️ Список пуст."
-        await query.edit_message_text(text)
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin_back")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif data == "add_product":
         await query.edit_message_text("Введите название нового товара:")
@@ -198,31 +145,82 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await query.edit_message_text("⚠️ Список товаров пуст.")
             return ConversationHandler.END
         keyboard = [[InlineKeyboardButton(f"🗑 {p}", callback_data=f"delete_{p}")] for p in products]
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="admin_back")])
         await query.edit_message_text("Выберите товар для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
         return REMOVE_PRODUCT
+
+    elif data == "edit_product":
+        products = get_products()
+        if not products:
+            await query.edit_message_text("⚠️ Список товаров пуст.")
+            return ConversationHandler.END
+        keyboard = [[InlineKeyboardButton(f"✏️ {p}", callback_data=f"edit_{p}")] for p in products]
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="admin_back")])
+        await query.edit_message_text("Выберите товар для редактирования:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return SELECT_PRODUCT_TO_EDIT
 
     elif data == "last_orders":
         cursor.execute("SELECT user_id, username, product, quantity FROM orders ORDER BY id DESC LIMIT 5")
         orders = cursor.fetchall()
-        if not orders:
-            await query.edit_message_text("📦 Заказов пока нет.")
-            return ConversationHandler.END
-        text = "📦 Последние заказы:\n\n" + "".join(f"👤 @{u[1] or u[0]}: {u[3]} × {u[2]}\n" for u in orders)
-        await query.edit_message_text(text)
+        text = "📦 Последние заказы:\n\n" + "".join(f"👤 @{u[1] or u[0]}: {u[3]} × {u[2]}\n" for u in orders) if orders else "📦 Заказов пока нет."
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin_back")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif data == "stats":
+        cursor.execute("SELECT COUNT(*) FROM orders")
+        total_orders = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM products")
+        total_products = cursor.fetchone()[0]
+        text = f"📊 Статистика:\n📦 Заказов: {total_orders}\n📋 Товаров: {total_products}"
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin_back")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif data == "clear_orders":
         keyboard = [
             [InlineKeyboardButton("✅ Да, очистить", callback_data="confirm_clear_yes")],
-            [InlineKeyboardButton("❌ Отмена", callback_data="confirm_clear_no")]
+            [InlineKeyboardButton("❌ Отмена", callback_data="admin_back")]
         ]
         await query.edit_message_text("⚠️ Ты уверен, что хочешь удалить все заказы?", reply_markup=InlineKeyboardMarkup(keyboard))
-        return CONFIRM_CLEAR
 
     elif data == "upload_media":
         await query.edit_message_text("📸 Пришли фото, видео или gif, которое будет обложкой при /start.")
         return WAIT_MEDIA
 
-# === ДОБАВЛЕНИЕ / УДАЛЕНИЕ ТОВАРОВ ===
+    elif data == "admin_back":
+        await show_admin_menu(query, context)
+
+# === EDIT PRODUCT ===
+async def select_product_to_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data["edit_product"] = query.data.replace("edit_", "")
+    await query.edit_message_text(f"✏️ Введите новое имя для товара «{context.user_data['edit_product']}»:")
+    return EDIT_PRODUCT_NAME
+
+async def edit_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    new_name = update.message.text.strip()
+    old_name = context.user_data.get("edit_product")
+    if not old_name:
+        await update.message.reply_text("⚠️ Ошибка: не выбран товар.")
+        return ConversationHandler.END
+
+    if not new_name:
+        await update.message.reply_text("❌ Название не может быть пустым.")
+        return EDIT_PRODUCT_NAME
+
+    try:
+        cursor.execute("UPDATE products SET name=%s WHERE name=%s", (new_name, old_name))
+        conn.commit()
+    except IntegrityError:
+        conn.rollback()
+        await update.message.reply_text("❌ Товар с таким названием уже существует.")
+        return EDIT_PRODUCT_NAME
+
+    await update.message.reply_text(f"✅ Товар «{old_name}» переименован в «{new_name}».")
+    await show_admin_menu(update, context)
+    return ConversationHandler.END
+
+# === ADD / REMOVE PRODUCT ===
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip()
     if not name:
@@ -246,29 +244,27 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
     await query.edit_message_text(f"🗑 Товар «{name}» удалён.")
     return ConversationHandler.END
 
-# === ЗАПУСК ===
+# === MAIN ===
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
-conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("start", start),
-                  CommandHandler("admin", admin_menu)],
-    states={
-        SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
-        SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
-        ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
-        REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
-        EDIT_PRODUCT: [
-            CallbackQueryHandler(edit_product_handler, pattern="^edit_.*$"),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_name)
-        ],
-    },
-    fallbacks=[CommandHandler("cancel", cancel)],
-)
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", start),
+                      CommandHandler("admin", admin_menu)],
+        states={
+            SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
+            SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
+            ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
+            REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
+            SELECT_PRODUCT_TO_EDIT: [CallbackQueryHandler(select_product_to_edit, pattern="^edit_.*$")],
+            EDIT_PRODUCT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_name)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
 
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
-                                         pattern="^(list_products|add_product|remove_product|last_orders|clear_orders|upload_media)$"))
+                                         pattern="^(list_products|add_product|remove_product|edit_product|last_orders|clear_orders|upload_media|stats|admin_back)$"))
     app.run_polling()
 
 if __name__ == "__main__":
