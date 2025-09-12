@@ -10,43 +10,36 @@ from telegram.ext import (
 BOT_TOKEN = "743563203:AAHwP9ZkApgJc8BPBZpLMuvaJT_vNs1ja-s"
 ADMIN_ID = 472044641
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_FILE = os.path.join(BASE_DIR, "bot.db")
+DB_FILE = "bot.db"  # база в рабочей директории Railway
 
-HEADER_IMAGE = os.path.join(BASE_DIR, "header.jpg")
-HEADER_VIDEO = os.path.join(BASE_DIR, "header.mp4")
-HEADER_GIF = os.path.join(BASE_DIR, "header.gif")
-
+HEADER_IMAGE = "header.jpg"
+HEADER_VIDEO = "header.mp4"
+HEADER_GIF = "header.gif"
 CONTACT_LINK = "https://t.me/mobilike_com"
 
 # === STATES ===
 SELECT_PRODUCT, SELECT_QUANTITY, ADD_PRODUCT, REMOVE_PRODUCT, CONFIRM_CLEAR, WAIT_MEDIA = range(6)
 
-# === ИНИЦИАЛИЗАЦИЯ БАЗЫ ===
+# === БАЗА ДАННЫХ ===
 conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 cursor = conn.cursor()
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS products(
+cursor.execute("""CREATE TABLE IF NOT EXISTS products(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE
-)
-""")
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS orders(
+)""")
+cursor.execute("""CREATE TABLE IF NOT EXISTS orders(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT,
     username TEXT,
     product TEXT,
     quantity TEXT
-)
-""")
+)""")
 conn.commit()
 
-# === КЛИЕНТСКАЯ ЧАСТЬ ===
+# === ФУНКЦИИ ===
 def get_products():
-    cursor.execute("SELECT name FROM products")
+    cursor.execute("SELECT name FROM products ORDER BY id ASC")
     return [row[0] for row in cursor.fetchall()]
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -91,6 +84,7 @@ async def quantity_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
 
     await update.message.reply_text(f"✅ Ваш заказ на {quantity} × {product} принят!")
+
     admin_message = f"📦 Новый заказ!\n👤 @{user.username or user.id}\n🛒 {product}\n🔢 Кол-во: {quantity}"
     await context.bot.send_message(chat_id=ADMIN_ID, text=admin_message)
     return ConversationHandler.END
@@ -125,7 +119,7 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     elif data == "add_product":
         await query.edit_message_text("Введите название нового товара:")
-        return ADD_PRODUCT  # ✅ Возвращаем состояние
+        return ADD_PRODUCT  # ✅ возвращаем состояние
 
     elif data == "remove_product":
         products = get_products()
@@ -134,7 +128,7 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return ConversationHandler.END
         keyboard = [[InlineKeyboardButton(f"🗑 {p}", callback_data=f"delete_{p}")] for p in products]
         await query.edit_message_text("Выберите товар для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
-        return REMOVE_PRODUCT  # ✅ Возвращаем состояние
+        return REMOVE_PRODUCT  # ✅ возвращаем состояние
 
     elif data == "last_orders":
         cursor.execute("SELECT user_id, username, product, quantity FROM orders ORDER BY id DESC LIMIT 5")
@@ -157,7 +151,7 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text("📸 Пришли фото, видео или gif, которое будет обложкой при /start.")
         return WAIT_MEDIA
 
-# === Добавление / удаление товаров ===
+# === ДОБАВЛЕНИЕ / УДАЛЕНИЕ ТОВАРОВ ===
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip()
     if not name:
@@ -166,7 +160,8 @@ async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         cursor.execute("INSERT INTO products(name) VALUES (?)", (name,))
         conn.commit()
-        await update.message.reply_text(f"✅ Товар «{name}» добавлен.")
+        await update.message.reply_text(f"✅ Товар «{name}» добавлен!")
+        print(f"[INFO] Added product: {name}")
     except sqlite3.IntegrityError:
         await update.message.reply_text("❌ Такой товар уже есть.")
     return ConversationHandler.END
@@ -180,7 +175,7 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
     await query.edit_message_text(f"🗑 Товар «{name}» удалён.")
     return ConversationHandler.END
 
-# === Обложка ===
+# === ОБЛОЖКА ===
 async def upload_media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.video:
         file = await update.message.video.get_file()
@@ -205,7 +200,7 @@ async def upload_media_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return WAIT_MEDIA
     return ConversationHandler.END
 
-# === Очистка заказов ===
+# === ОЧИСТКА ЗАКАЗОВ ===
 async def clear_orders_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -246,6 +241,7 @@ def main():
     app.add_handler(CommandHandler("admin", admin_menu))
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
                                          pattern="^(list_products|add_product|remove_product|last_orders|clear_orders|upload_media)$"))
+
     app.run_polling()
 
 if __name__ == "__main__":
