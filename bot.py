@@ -236,7 +236,11 @@ async def edit_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # === MAIN ===
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    try:
+        app = Application.builder().token(BOT_TOKEN).build()
+    except Exception as e:
+        print(f"❌ Ошибка при запуске бота: {e}")
+        return
 
     conv_handler = ConversationHandler(
         entry_points=[
@@ -252,10 +256,11 @@ def main():
             EDIT_PRODUCT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_name)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
-        allow_reentry=True
+        allow_reentry=True  # ✅ можно повторно заходить в состояние
         # ❌ убрали per_message, иначе MessageHandler не отрабатывает
     )
 
+    # Регистрируем обработчики
     app.add_handler(conv_handler)
     app.add_handler(
         CallbackQueryHandler(
