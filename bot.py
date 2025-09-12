@@ -8,7 +8,7 @@ from telegram.ext import (
 )
 
 # === ЛОГИ ===
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # === НАСТРОЙКИ ===
@@ -119,40 +119,46 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-    data = query.data
+    try:
+        await query.answer()
+        data = query.data
+        logger.info("Обработка admin-кнопки: %s", data)
 
-    if data == "list_products":
-        products = get_products()
-        text = "📋 Товары:\n" + "\n".join(f"• {p}" for p in products) if products else "⚠️ Список пуст."
-        await query.edit_message_text(text)
+        if data == "list_products":
+            products = get_products()
+            text = "📋 Товары:\n" + "\n".join(f"• {p}" for p in products) if products else "⚠️ Список пуст."
+            await query.edit_message_text(text)
 
-    elif data == "add_product":
-        await query.edit_message_text("Введите название нового товара:")
-        return ADD_PRODUCT
+        elif data == "add_product":
+            await query.edit_message_text("Введите название нового товара:")
+            return ADD_PRODUCT
 
-    elif data == "remove_product":
-        products = get_products()
-        if not products:
-            await query.edit_message_text("⚠️ Список пуст.")
-            return ConversationHandler.END
-        keyboard = [[InlineKeyboardButton(f"🗑 {p}", callback_data=f"delete_{p}")] for p in products]
-        await query.edit_message_text("Выберите товар для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
-        return REMOVE_PRODUCT
+        elif data == "remove_product":
+            products = get_products()
+            if not products:
+                await query.edit_message_text("⚠️ Список пуст.")
+                return ConversationHandler.END
+            keyboard = [[InlineKeyboardButton(f"🗑 {p}", callback_data=f"delete_{p}")] for p in products]
+            await query.edit_message_text("Выберите товар для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
+            return REMOVE_PRODUCT
 
-    elif data == "last_orders":
-        cursor.execute("SELECT user_id, username, product, quantity FROM orders ORDER BY id DESC LIMIT 5")
-        orders = cursor.fetchall()
-        if not orders:
-            await query.edit_message_text("📦 Заказов нет.")
-            return ConversationHandler.END
-        text = "📦 Последние заказы:\n" + "".join(f"👤 @{u[1] or u[0]}: {u[3]} × {u[2]}\n" for u in orders)
-        await query.edit_message_text(text)
+        elif data == "last_orders":
+            cursor.execute("SELECT user_id, username, product, quantity FROM orders ORDER BY id DESC LIMIT 5")
+            orders = cursor.fetchall()
+            if not orders:
+                await query.edit_message_text("📦 Заказов нет.")
+                return ConversationHandler.END
+            text = "📦 Последние заказы:\n" + "".join(f"👤 @{u[1] or u[0]}: {u[3]} × {u[2]}\n" for u in orders)
+            await query.edit_message_text(text)
 
-    elif data == "clear_orders":
-        cursor.execute("DELETE FROM orders")
-        conn.commit()
-        await query.edit_message_text("🧹 Все заказы удалены.")
+        elif data == "clear_orders":
+            cursor.execute("DELETE FROM orders")
+            conn.commit()
+            await query.edit_message_text("🧹 Все заказы удалены.")
+
+    except Exception as e:
+        logger.error("Ошибка в admin_handler: %s", str(e))
+        await query.edit_message_text("❌ Ошибка при обработке кнопки.")
     return ConversationHandler.END
 
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
