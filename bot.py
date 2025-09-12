@@ -1,6 +1,6 @@
 import os
 import psycopg2
-from psycopg2 import IntegrityError
+from psycopg2.errors import UniqueViolation
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -160,6 +160,34 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text("📸 Пришли фото, видео или gif, которое будет обложкой при /start.")
         return WAIT_MEDIA
 
+# === ДОБАВЛЕНИЕ / УДАЛЕНИЕ ТОВАРОВ ===
+async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    name = update.message.text.strip()
+    if not name:
+        await update.message.reply_text("❌ Название товара не может быть пустым.")
+        return ADD_PRODUCT
+    try:
+        print(f"[DEBUG] Добавляю товар: {name}")
+        cursor.execute("INSERT INTO products(name) VALUES (%s)", (name,))
+        conn.commit()
+        await update.message.reply_text(f"✅ Товар «{name}» добавлен!")
+    except UniqueViolation:
+        conn.rollback()
+        await update.message.reply_text("❌ Такой товар уже есть.")
+    except Exception as e:
+        conn.rollback()
+        await update.message.reply_text(f"⚠️ Ошибка при добавлении товара: {e}")
+    return ConversationHandler.END
+
+async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    name = query.data.replace("delete_", "")
+    cursor.execute("DELETE FROM products WHERE name=%s", (name,))
+    conn.commit()
+    await query.edit_message_text(f"🗑 Товар «{name}» удалён.")
+    return ConversationHandler.END
+
 # === ОБРАБОТКА МЕДИА ===
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = None
@@ -178,30 +206,6 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await file.download_to_drive(filename)
     await update.message.reply_text("✅ Обложка обновлена! Теперь она будет отображаться при /start.")
-    return ConversationHandler.END
-
-# === ДОБАВЛЕНИЕ / УДАЛЕНИЕ ТОВАРОВ ===
-async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = update.message.text.strip()
-    if not name:
-        await update.message.reply_text("❌ Название товара не может быть пустым.")
-        return ADD_PRODUCT
-    try:
-        cursor.execute("INSERT INTO products(name) VALUES (%s)", (name,))
-        conn.commit()
-        await update.message.reply_text(f"✅ Товар «{name}» добавлен!")
-    except IntegrityError:
-        conn.rollback()
-        await update.message.reply_text("❌ Такой товар уже есть.")
-    return ConversationHandler.END
-
-async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    name = query.data.replace("delete_", "")
-    cursor.execute("DELETE FROM products WHERE name=%s", (name,))
-    conn.commit()
-    await query.edit_message_text(f"🗑 Товар «{name}» удалён.")
     return ConversationHandler.END
 
 # === ЗАПУСК ===
