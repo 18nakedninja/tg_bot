@@ -1,6 +1,7 @@
 import os
 import logging
 import psycopg2
+from psycopg2.errors import UniqueViolation
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -171,7 +172,7 @@ async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cursor.execute("INSERT INTO products(name) VALUES (%s)", (name,))
         conn.commit()
         await update.message.reply_text(f"✅ Товар «{name}» добавлен.")
-    except psycopg2.errors.UniqueViolation:
+    except UniqueViolation:
         conn.rollback()
         await update.message.reply_text("❌ Такой товар уже существует.")
     return ConversationHandler.END
