@@ -24,7 +24,7 @@ CONTACT_LINK = "https://t.me/mobilike_com"
 SELECT_PRODUCT, SELECT_QUANTITY, ADD_PRODUCT, REMOVE_PRODUCT, EDIT_PRODUCT_NAME = range(5)
 
 # ================= ПОДКЛЮЧЕНИЕ К БАЗЕ =================
-DATABASE_URL = os.environ.get("postgresql://postgres:bVUsvGYRNbUYqKNdntqqngMZUWZWpYSh@postgres.railway.internal:5432/railway")  # Railway или локальный URL
+DATABASE_URL = os.environ.get("DATABASE_URL")  # Railway или локальный URL
 
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL не задан! Проверь переменные окружения на Railway.")
