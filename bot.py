@@ -242,26 +242,35 @@ async def edit_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
-conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("start", start),
-                  CommandHandler("admin", admin_menu)],
-    states={
-        SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
-        SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
-        ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
-        REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
-        CONFIRM_CLEAR: [CallbackQueryHandler(confirm_clear_handler)],
-        WAIT_MEDIA: [MessageHandler(filters.ALL, upload_media_handler)]
-    },
-    fallbacks=[CommandHandler("cancel", cancel)],
-    allow_reentry=True,   # <-- ДОБАВИЛ, чтобы можно было снова войти в add_product
-    per_message=True      # <-- САМОЕ ГЛАВНОЕ! иначе MessageHandler не отработает
-)
+    conv_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler("start", start),
+            CommandHandler("admin", admin_menu)
+        ],
+        states={
+            SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
+            SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
+            ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
+            REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
+            SELECT_PRODUCT_TO_EDIT: [CallbackQueryHandler(select_product_to_edit, pattern="^edit_.*$")],
+            EDIT_PRODUCT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_name)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        allow_reentry=True,
+        per_message=True  # ✅ добавляем, чтобы отлавливать ввод текста
+    )
 
     app.add_handler(conv_handler)
-    app.add_handler(CallbackQueryHandler(admin_menu_handler,
-                                         pattern="^(list_products|add_product|remove_product|edit_product|last_orders|stats|admin_back)$"))
+    app.add_handler(
+        CallbackQueryHandler(
+            admin_menu_handler,
+            pattern="^(list_products|add_product|remove_product|edit_product|last_orders|stats|admin_back)$"
+        )
+    )
+
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
+
