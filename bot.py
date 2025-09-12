@@ -1,7 +1,7 @@
 import os
 import asyncio
 import psycopg2
-from psycopg2 import pool, IntegrityError, OperationalError
+from psycopg2 import pool, IntegrityError
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -9,7 +9,7 @@ from telegram.ext import (
 )
 
 # === НАСТРОЙКИ ===
-BOT_TOKEN = os.environ.get("BOT_TOKEN") or "8342478210:AAFd3jAdENjgZ52FHmcm3jtDhkP4rpfOJLg"
+BOT_TOKEN = os.environ.get("BOT_TOKEN") or "ВАШ_BOT_TOKEN"
 ADMIN_ID = 472044641
 
 HEADER_IMAGE = "header.jpg"
@@ -22,19 +22,15 @@ SELECT_PRODUCT = 0
 SELECT_QUANTITY = 1
 ADD_PRODUCT = 2
 REMOVE_PRODUCT = 3
-CONFIRM_CLEAR = 4
-WAIT_MEDIA = 5
-SELECT_PRODUCT_TO_EDIT = 6
-EDIT_PRODUCT_NAME = 7
+SELECT_PRODUCT_TO_EDIT = 4
+EDIT_PRODUCT_NAME = 5
 
 # === CONNECTION POOL ===
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL не задана!")
 
-db_pool = pool.SimpleConnectionPool(
-    1, 10, dsn=DATABASE_URL
-)
+db_pool = pool.SimpleConnectionPool(1, 10, dsn=DATABASE_URL)
 
 # === DATABASE HELPERS ===
 def execute_query(query, params=None, fetch=False):
@@ -135,8 +131,6 @@ async def show_admin_menu(update_or_query, context):
         [InlineKeyboardButton("✏️ Редактировать товар", callback_data="edit_product")],
         [InlineKeyboardButton("📦 Последние заказы", callback_data="last_orders")],
         [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
-        [InlineKeyboardButton("🧹 Очистить заказы", callback_data="clear_orders")],
-        [InlineKeyboardButton("🖼 Загрузить обложку", callback_data="upload_media")]
     ]
     text = "⚙️ <b>Админ-панель</b>\n\nВыберите действие:"
     if isinstance(update_or_query, Update):
@@ -162,8 +156,7 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif data == "add_product":
-        await query.edit_message_text("Введите название нового товара:")
-        await asyncio.sleep(0.3)
+        await query.edit_message_text("✏️ Введите название нового товара:")
         return ADD_PRODUCT
 
     elif data == "remove_product":
@@ -202,9 +195,8 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     elif data == "admin_back":
         await show_admin_menu(query, context)
 
-# === ADD / EDIT / REMOVE PRODUCT ===
+# === ADD / REMOVE / EDIT PRODUCT ===
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    import asyncio
     name = update.message.text.strip()
     if not name:
         await update.message.reply_text("❌ Название товара не может быть пустым.")
@@ -215,7 +207,7 @@ async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Такой товар уже есть.")
         return ADD_PRODUCT
     await update.message.reply_text(f"✅ Товар «{name}» добавлен!")
-    await asyncio.sleep(0.3)
+    await asyncio.sleep(0.2)
     await show_admin_menu(update, context)
     return ConversationHandler.END
 
@@ -255,8 +247,7 @@ def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start),
-                      CommandHandler("admin", admin_menu)],
+        entry_points=[CommandHandler("start", start), CommandHandler("admin", admin_menu)],
         states={
             SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
             SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
