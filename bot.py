@@ -160,26 +160,6 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text("📸 Пришли фото, видео или gif, которое будет обложкой при /start.")
         return WAIT_MEDIA
 
-# === ОБРАБОТКА МЕДИА ===
-async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    file = None
-    if update.message.photo:
-        file = await update.message.photo[-1].get_file()
-        filename = HEADER_IMAGE
-    elif update.message.video:
-        file = await update.message.video.get_file()
-        filename = HEADER_VIDEO
-    elif update.message.animation:
-        file = await update.message.animation.get_file()
-        filename = HEADER_GIF
-    else:
-        await update.message.reply_text("❌ Пожалуйста, пришли фото, видео или gif.")
-        return WAIT_MEDIA
-
-    await file.download_to_drive(filename)
-    await update.message.reply_text("✅ Обложка обновлена! Теперь она будет отображаться при /start.")
-    return ConversationHandler.END
-
 # === ДОБАВЛЕНИЕ / УДАЛЕНИЕ ТОВАРОВ ===
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip()
@@ -203,15 +183,6 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
     conn.commit()
     await query.edit_message_text(f"🗑 Товар «{name}» удалён.")
     return ConversationHandler.END
-
-# === ГЛОБАЛЬНЫЙ ОБРАБОТЧИК ОШИБОК ===
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    print(f"[ERROR] {context.error}")
-    if update and hasattr(update, "effective_chat"):
-        try:
-            await update.effective_chat.send_message("⚠️ Произошла ошибка. Попробуйте снова.")
-        except:
-            pass
 
 # === ЗАПУСК ===
 def main():
