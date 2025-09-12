@@ -180,18 +180,32 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # === ADD / REMOVE / EDIT PRODUCT ===
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = update.message.text.strip()
-    if not name:
-        await update.message.reply_text("❌ Название товара не может быть пустым.")
-        return ADD_PRODUCT
     try:
-        execute_query("INSERT INTO products(name) VALUES (%s)", (name,))
-    except IntegrityError:
-        await update.message.reply_text("❌ Такой товар уже есть.")
-        return ADD_PRODUCT
-    await update.message.reply_text(f"✅ Товар «{name}» добавлен!")
-    await show_admin_menu(update, context)
-    return ConversationHandler.END
+        name = update.message.text.strip()
+        print(f"[DEBUG] add_product_name вызван, получили: {name}")  # лог в консоль
+
+        if not name:
+            await update.message.reply_text("❌ Название товара не может быть пустым.")
+            return ADD_PRODUCT
+
+        try:
+            execute_query("INSERT INTO products(name) VALUES (%s)", (name,))
+        except IntegrityError:
+            await update.message.reply_text("❌ Такой товар уже есть.")
+            return ADD_PRODUCT
+        except Exception as db_error:
+            print(f"[ERROR] Ошибка при добавлении товара: {db_error}")
+            await update.message.reply_text(f"❌ Ошибка БД: {db_error}")
+            return ADD_PRODUCT
+
+        await update.message.reply_text(f"✅ Товар «{name}» добавлен!")
+        await show_admin_menu(update, context)
+        return ConversationHandler.END
+
+    except Exception as e:
+        print(f"[CRITICAL] add_product_name упал: {e}")
+        await update.message.reply_text(f"❌ Критическая ошибка: {e}")
+        return ConversationHandler.END
 
 async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
