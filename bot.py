@@ -1,5 +1,6 @@
 import os
 import psycopg2
+from psycopg2 import IntegrityError
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -19,7 +20,10 @@ CONTACT_LINK = "https://t.me/mobilike_com"
 SELECT_PRODUCT, SELECT_QUANTITY, ADD_PRODUCT, REMOVE_PRODUCT, CONFIRM_CLEAR, WAIT_MEDIA = range(6)
 
 # === ПОДКЛЮЧЕНИЕ К POSTGRESQL ===
-DATABASE_URL = os.environ.get("${{ Postgres.DATABASE_URL }}")
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL не задана! Проверь переменные окружения на Railway.")
+
 conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
 
@@ -166,7 +170,8 @@ async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cursor.execute("INSERT INTO products(name) VALUES (%s)", (name,))
         conn.commit()
         await update.message.reply_text(f"✅ Товар «{name}» добавлен!")
-    except:
+    except IntegrityError:
+        conn.rollback()
         await update.message.reply_text("❌ Такой товар уже есть.")
     return ConversationHandler.END
 
