@@ -225,7 +225,8 @@ async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip()
     if not name:
         await update.message.reply_text("❌ Название товара не может быть пустым.")
-        return ADD_PRODUCT
+        return ADD_PRODUCT  # остаёмся в этом состоянии
+
     try:
         cursor.execute("INSERT INTO products(name) VALUES (%s)", (name,))
         conn.commit()
@@ -233,6 +234,10 @@ async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except IntegrityError:
         conn.rollback()
         await update.message.reply_text("❌ Такой товар уже есть.")
+        return ADD_PRODUCT  # остаёмся в этом состоянии
+
+    # После успешного добавления возвращаем админ-панель
+    await show_admin_menu(update, context)
     return ConversationHandler.END
 
 async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -242,6 +247,7 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
     cursor.execute("DELETE FROM products WHERE name=%s", (name,))
     conn.commit()
     await query.edit_message_text(f"🗑 Товар «{name}» удалён.")
+    await show_admin_menu(update, context)  # возвращаем админ-панель
     return ConversationHandler.END
 
 # === MAIN ===
