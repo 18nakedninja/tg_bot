@@ -85,96 +85,90 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # === АДМИН-МЕНЮ ===
-# Пустой список товаров при старте
-products = []
-
 async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Главное админ-меню"""
-    query = update.callback_query
-    if query:
-        await query.answer()
-
+    if update.message.from_user.id != ADMIN_ID:
+        return
     keyboard = [
         [InlineKeyboardButton("📋 Список товаров", callback_data="list_products")],
         [InlineKeyboardButton("➕ Добавить товар", callback_data="add_product")],
-        [InlineKeyboardButton("❌ Удалить товар", callback_data="remove_product")],
+        [InlineKeyboardButton("🗑 Удалить товар", callback_data="remove_product")],
+        [InlineKeyboardButton("📦 Последние заказы", callback_data="last_orders")],
         [InlineKeyboardButton("🧹 Очистить заказы", callback_data="clear_orders")],
-        [InlineKeyboardButton("🖼 Загрузить картинку", callback_data="upload_media")],
+        [InlineKeyboardButton("🖼 Загрузить обложку", callback_data="upload_media")]
     ]
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    if query:
-        await query.edit_message_text("🔧 Админ-меню", reply_markup=reply_markup)
-    else:
-        await update.message.reply_text("🔧 Админ-меню", reply_markup=reply_markup)
-
+    await update.message.reply_text("⚙️ Админ-меню:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик всех кнопок в админ-меню"""
     query = update.callback_query
     await query.answer()
 
     if query.data == "list_products":
-        if not products:
-            await query.edit_message_text("📭 Список товаров пуст.")
-        else:
-            text = "📋 Текущие товары:\n" + "\n".join([f"• {p}" for p in products])
-            await query.edit_message_text(text)
+        text = "📋 Список товаров:\n" + "\n".join(f"• {p}" for p in PRODUCTS) if PRODUCTS else "⚠️ Список пуст."
+        await query.edit_message_text(text)
 
     elif query.data == "add_product":
-        await query.edit_message_text("✏️ Введите название нового товара:")
+        await query.edit_message_text("Введите название нового товара:")
         return ADD_PRODUCT
 
     elif query.data == "remove_product":
-        if not products:
-            await query.edit_message_text("📭 Нет товаров для удаления.")
-            return
-        keyboard = [
-            [InlineKeyboardButton(f"❌ {p}", callback_data=f"remove:{p}")] for p in products
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("Выберите товар для удаления:", reply_markup=reply_markup)
+        if not PRODUCTS:
+            await query.edit_message_text("⚠️ Список товаров пуст.")
+            return ConversationHandler.END
+        keyboard = [[InlineKeyboardButton(f"🗑 {p}", callback_data=f"delete_{p}")] for p in PRODUCTS]
+        await query.edit_message_text("Выберите товар для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return REMOVE_PRODUCT
+
+    elif query.data == "last_orders":
+        if not os.path.exists(ORDERS_FILE):
+            await query.edit_message_text("📦 Заказов пока нет.")
+            return ConversationHandler.END
+        with open(ORDERS_FILE, "r", encoding="utf-8") as f:
+            orders = f.readlines()
+        last_orders = orders[-5:] if len(orders) > 5 else orders
+        text = "📦 Последние заказы:\n\n" + "".join(last_orders)
+        await query.edit_message_text(text)
 
     elif query.data == "clear_orders":
         keyboard = [
-            [InlineKeyboardButton("✅ Да", callback_data="confirm_clear_yes"),
-             InlineKeyboardButton("❌ Нет", callback_data="confirm_clear_no")]
+            [InlineKeyboardButton("✅ Да, очистить", callback_data="confirm_clear_yes")],
+            [InlineKeyboardButton("❌ Отмена", callback_data="confirm_clear_no")]
         ]
-        await query.edit_message_text("Вы уверены, что хотите удалить все заказы?", reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_text("⚠️ Ты уверен, что хочешь удалить все заказы?", reply_markup=InlineKeyboardMarkup(keyboard))
+        return CONFIRM_CLEAR
 
     elif query.data == "upload_media":
-        await query.edit_message_text("📤 Пришлите новую картинку.")
+        await query.edit_message_text("📸 Пришли фото, видео или gif, которое будет обложкой при /start.")
         return WAIT_MEDIA
 
-
-async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Добавление нового товара"""
-    product_name = update.message.text.strip()
-    if product_name:
-        products.append(product_name)
-        await update.message.reply_text(f"✅ Товар «{product_name}» добавлен!")
-    else:
-        await update.message.reply_text("⚠️ Пустое название, попробуйте снова.")
-    return ConversationHandler.END
-
-
-async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Удаление выбранного товара"""
+async def clear_orders_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
-    if not query.data.startswith("remove:"):
-        await query.edit_message_text("⚠️ Ошибка: неправильный формат.")
-        return
-
-    product_to_remove = query.data.split("remove:")[1]
-
-    if product_to_remove in products:
-        products.remove(product_to_remove)
-        await query.edit_message_text(f"✅ Товар «{product_to_remove}» удалён!")
+    if query.data == "confirm_clear_yes":
+        if os.path.exists(ORDERS_FILE):
+            os.remove(ORDERS_FILE)
+        await query.edit_message_text("🧹 Все заказы успешно удалены.")
     else:
-        await query.edit_message_text("⚠️ Товар не найден.")
+        await query.edit_message_text("❌ Очистка отменена.")
+    return ConversationHandler.END
+
+async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    product_name = update.message.text
+    PRODUCTS.append(product_name)
+    save_products(PRODUCTS)
+    await update.message.reply_text(f"✅ Товар «{product_name}» добавлен.")
+    return ConversationHandler.END
+
+async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    product_name = query.data.replace("delete_", "")
+    if product_name in PRODUCTS:
+        PRODUCTS.remove(product_name)
+        save_products(PRODUCTS)
+        await query.edit_message_text(f"🗑 Товар «{product_name}» удалён.")
+    else:
+        await query.edit_message_text("❌ Ошибка: товар не найден.")
+    return ConversationHandler.END
 
 async def upload_media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.video:
