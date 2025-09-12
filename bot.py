@@ -35,7 +35,6 @@ SELECT_PRODUCT, SELECT_QUANTITY, ADD_PRODUCT, REMOVE_PRODUCT, CONFIRM_CLEAR, WAI
 
 # === КЛИЕНТСКАЯ ЧАСТЬ ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Отправляем обложку, если есть
     if os.path.exists(HEADER_VIDEO):
         with open(HEADER_VIDEO, "rb") as v:
             await update.message.reply_video(v, caption="Выберите товар:")
@@ -198,7 +197,6 @@ def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
     async def post_init(application):
-        # Эта функция вызывается автоматически после старта приложения
         await application.bot.set_my_commands([
             ("start", "Сделать заказ"),
             ("cancel", "Отменить действие"),
@@ -207,11 +205,20 @@ def main():
 
     app.post_init = post_init
 
+    # Conversation для клиентов
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
             SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
             SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    # Conversation для админа
+    admin_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("admin", admin_menu)],
+        states={
             ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
             REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler)],
             CONFIRM_CLEAR: [CallbackQueryHandler(clear_orders_confirm)],
@@ -221,11 +228,10 @@ def main():
     )
 
     app.add_handler(conv_handler)
-    app.add_handler(CommandHandler("admin", admin_menu))
+    app.add_handler(admin_conv_handler)
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
                                          pattern="^(list_products|add_product|remove_product|last_orders|clear_orders|upload_media)$"))
 
-    # 🚀 Нормальный запуск без сложных asyncio.run()
     app.run_polling()
 
 if __name__ == "__main__":
