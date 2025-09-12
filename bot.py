@@ -21,7 +21,7 @@ HEADER_GIF = "header.gif"
 CONTACT_LINK = "https://t.me/mobilike_com"
 
 # === STATES ===
-SELECT_PRODUCT, SELECT_QUANTITY, ADD_PRODUCT, REMOVE_PRODUCT, CONFIRM_CLEAR = range(5)
+SELECT_PRODUCT, SELECT_QUANTITY, ADD_PRODUCT, REMOVE_PRODUCT = range(4)
 
 # === БАЗА ДАННЫХ ===
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -157,6 +157,7 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip()
+    logger.info("Добавление товара: %s", name)
     if not name:
         await update.message.reply_text("❌ Название не может быть пустым.")
         return ADD_PRODUCT
@@ -187,15 +188,16 @@ def main():
         states={
             SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
             SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
-            ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
+            ADD_PRODUCT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name),
+                CallbackQueryHandler(admin_handler, pattern="^(list_products|add_product|remove_product|last_orders|clear_orders)$")
+            ],
             REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
     app.add_handler(conv)
-    app.add_handler(CallbackQueryHandler(admin_handler,
-        pattern="^(list_products|add_product|remove_product|last_orders|clear_orders)$"))
     app.run_polling()
 
 if __name__ == "__main__":
