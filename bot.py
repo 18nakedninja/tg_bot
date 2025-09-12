@@ -9,15 +9,20 @@ from telegram.ext import (
 )
 
 # === НАСТРОЙКИ ===
-BOT_TOKEN = "743563203:AAHwP9ZkApgJc8BPBZpLMuvaJT_vNs1ja-s"  # <-- токен прямо в коде
-ADMIN_ID = 472044641  # <-- замени на свой Telegram user ID
-PRODUCTS_FILE = "products.json"
-ORDERS_FILE = "orders.txt"
-HEADER_IMAGE = "header.jpg"
-HEADER_VIDEO = "header.mp4"
-HEADER_GIF = "header.gif"
-CONTACT_LINK = "https://t.me/mobilike_com"  # <-- сюда ссылку на твой Telegram
+BOT_TOKEN = "743563203:AAHwP9ZkApgJc8BPBZpLMuvaJT_vNs1ja-s"
+ADMIN_ID = 472044641  # твой Telegram ID
 
+# Пути файлов с абсолютным указанием, чтобы бот точно их видел
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PRODUCTS_FILE = os.path.join(BASE_DIR, "products.json")
+ORDERS_FILE = os.path.join(BASE_DIR, "orders.txt")
+HEADER_IMAGE = os.path.join(BASE_DIR, "header.jpg")
+HEADER_VIDEO = os.path.join(BASE_DIR, "header.mp4")
+HEADER_GIF = os.path.join(BASE_DIR, "header.gif")
+
+CONTACT_LINK = "https://t.me/mobilike_com"
+
+# === Работа с товарами ===
 def load_products():
     if os.path.exists(PRODUCTS_FILE):
         with open(PRODUCTS_FILE, "r", encoding="utf-8") as f:
@@ -53,8 +58,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [[InlineKeyboardButton(p, callback_data=p)] for p in PRODUCTS]
     keyboard.append([InlineKeyboardButton("📞 Связаться", url=CONTACT_LINK)])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("🛒 Список товаров:", reply_markup=reply_markup)
+    await update.message.reply_text("🛒 Список товаров:", reply_markup=InlineKeyboardMarkup(keyboard))
     return SELECT_PRODUCT
 
 async def product_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -73,10 +77,8 @@ async def quantity_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f.write(f"{user.username or user.id} заказал {quantity} × {product}\n")
 
     await update.message.reply_text(f"✅ Ваш заказ на {quantity} × {product} принят!")
-
     admin_message = f"📦 Новый заказ!\n👤 @{user.username or user.id}\n🛒 {product}\n🔢 Кол-во: {quantity}"
     await context.bot.send_message(chat_id=ADMIN_ID, text=admin_message)
-
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -100,15 +102,12 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     if query.data == "list_products":
         text = "📋 Список товаров:\n" + "\n".join(f"• {p}" for p in PRODUCTS) if PRODUCTS else "⚠️ Список пуст."
         await query.edit_message_text(text)
-
     elif query.data == "add_product":
         await query.edit_message_text("Введите название нового товара:")
         return ADD_PRODUCT
-
     elif query.data == "remove_product":
         if not PRODUCTS:
             await query.edit_message_text("⚠️ Список товаров пуст.")
@@ -116,7 +115,6 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         keyboard = [[InlineKeyboardButton(f"🗑 {p}", callback_data=f"delete_{p}")] for p in PRODUCTS]
         await query.edit_message_text("Выберите товар для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
         return REMOVE_PRODUCT
-
     elif query.data == "last_orders":
         if not os.path.exists(ORDERS_FILE):
             await query.edit_message_text("📦 Заказов пока нет.")
@@ -124,9 +122,7 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         with open(ORDERS_FILE, "r", encoding="utf-8") as f:
             orders = f.readlines()
         last_orders = orders[-5:] if len(orders) > 5 else orders
-        text = "📦 Последние заказы:\n\n" + "".join(last_orders)
-        await query.edit_message_text(text)
-
+        await query.edit_message_text("📦 Последние заказы:\n\n" + "".join(last_orders))
     elif query.data == "clear_orders":
         keyboard = [
             [InlineKeyboardButton("✅ Да, очистить", callback_data="confirm_clear_yes")],
@@ -134,27 +130,19 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         ]
         await query.edit_message_text("⚠️ Ты уверен, что хочешь удалить все заказы?", reply_markup=InlineKeyboardMarkup(keyboard))
         return CONFIRM_CLEAR
-
     elif query.data == "upload_media":
         await query.edit_message_text("📸 Пришли фото, видео или gif, которое будет обложкой при /start.")
         return WAIT_MEDIA
 
-async def clear_orders_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    if query.data == "confirm_clear_yes":
-        if os.path.exists(ORDERS_FILE):
-            os.remove(ORDERS_FILE)
-        await query.edit_message_text("🧹 Все заказы успешно удалены.")
-    else:
-        await query.edit_message_text("❌ Очистка отменена.")
-    return ConversationHandler.END
-
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    product_name = update.message.text
+    product_name = update.message.text.strip()
+    if not product_name:
+        await update.message.reply_text("❌ Название товара не может быть пустым. Введите снова:")
+        return ADD_PRODUCT
     PRODUCTS.append(product_name)
     save_products(PRODUCTS)
-    await update.message.reply_text(f"✅ Товар «{product_name}» добавлен.")
+    await update.message.reply_text(f"✅ Товар «{product_name}» добавлен.\n📋 Всего товаров: {len(PRODUCTS)}")
+    print(f"[DEBUG] Новый список товаров: {PRODUCTS}")  # Логи Railway
     return ConversationHandler.END
 
 async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -202,36 +190,25 @@ def main():
             ("cancel", "Отменить действие"),
             ("admin", "Админ-меню"),
         ])
-
     app.post_init = post_init
 
-    # Conversation для клиентов
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
             SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
             SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
-
-    # Conversation для админа
-    admin_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("admin", admin_menu)],
-        states={
             ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
             REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler)],
-            CONFIRM_CLEAR: [CallbackQueryHandler(clear_orders_confirm)],
+            CONFIRM_CLEAR: [CallbackQueryHandler(admin_menu_handler, pattern="^confirm_clear_.*$")],
             WAIT_MEDIA: [MessageHandler(filters.ALL, upload_media_handler)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
     app.add_handler(conv_handler)
-    app.add_handler(admin_conv_handler)
+    app.add_handler(CommandHandler("admin", admin_menu))
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
                                          pattern="^(list_products|add_product|remove_product|last_orders|clear_orders|upload_media)$"))
-
     app.run_polling()
 
 if __name__ == "__main__":
