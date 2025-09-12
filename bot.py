@@ -9,7 +9,7 @@ from telegram.ext import (
 )
 
 # === НАСТРОЙКИ ===
-BOT_TOKEN = os.environ.get("BOT_TOKEN") or "ВАШ_BOT_TOKEN"
+BOT_TOKEN = os.environ.get("BOT_TOKEN") or "8342478210:AAFd3jAdENjgZ52FHmcm3jtDhkP4rpfOJLg"
 ADMIN_ID = 472044641
 
 CONTACT_LINK = "https://t.me/mobilike_com"
