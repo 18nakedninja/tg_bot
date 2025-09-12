@@ -1,5 +1,7 @@
 import os
 import psycopg2
+import asyncio
+import signal
 from psycopg2 import IntegrityError
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -214,7 +216,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
             pass
 
 # === ЗАПУСК ===
-def main():
+async def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
     conv_handler = ConversationHandler(
@@ -227,15 +229,34 @@ def main():
             REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        per_chat=True,  # явно указываем, чтобы не было предупреждений
     )
 
     app.add_handler(conv_handler)
-    app.add_handler(CallbackQueryHandler(admin_menu_handler,
-                                         pattern="^(list_products|add_product|remove_product|last_orders|clear_orders|upload_media)$"))
-    app.run_polling()
+    app.add_handler(
+        CallbackQueryHandler(
+            admin_menu_handler,
+            pattern="^(list_products|add_product|remove_product|last_orders|clear_orders|upload_media)$"
+        )
+    )
+
+    # Обеспечиваем корректный выход при SIGTERM (Railway может посылать)
+    loop = asyncio.get_running_loop()
+    stop_event = asyncio.Event()
+
+    def handle_stop(*args):
+        print("📢 Получен сигнал остановки, завершаем работу...")
+        stop_event.set()
+
+    loop.add_signal_handler(signal.SIGTERM, handle_stop)
+    loop.add_signal_handler(signal.SIGINT, handle_stop)
+
+    async with app:
+        await app.start()
+        await app.updater.start_polling()
+        await stop_event.wait()  # ждём сигнала от Railway
+        await app.updater.stop()
+        await app.stop()
 
 if __name__ == "__main__":
-    main()
-
-if __name__ == "__main__":
-    main()
+    asyncio.run(main())
