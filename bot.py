@@ -204,9 +204,18 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
     await query.edit_message_text(f"🗑 Товар «{name}» удалён.")
     return ConversationHandler.END
 
+# === ГЛОБАЛЬНЫЙ ОБРАБОТЧИК ОШИБОК ===
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    print(f"[ERROR] {context.error}")
+    if update and hasattr(update, "effective_chat"):
+        try:
+            await update.effective_chat.send_message("⚠️ Произошла ошибка. Попробуйте снова.")
+        except:
+            pass
+
 # === ЗАПУСК ===
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).read_timeout(30).write_timeout(30).build()
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start),
@@ -218,11 +227,14 @@ def main():
             REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        per_message=True  # ✅ Теперь ConversationHandler отслеживает каждое сообщение
     )
 
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
                                          pattern="^(list_products|add_product|remove_product|last_orders|clear_orders|upload_media)$"))
+    app.add_error_handler(error_handler)
+
     app.run_polling()
 
 if __name__ == "__main__":
