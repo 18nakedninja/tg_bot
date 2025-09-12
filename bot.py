@@ -1,18 +1,22 @@
 import json
 import os
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+from telegram import (
+    Update, InlineKeyboardButton, InlineKeyboardMarkup
+)
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, filters, ContextTypes, ConversationHandler
 )
 
 # === НАСТРОЙКИ ===
-ADMIN_ID = 472044641  # <-- твой Telegram user ID
+BOT_TOKEN = "743563203:AAHwP9ZkApgJc8BPBZpLMuvaJT_vNs1ja-s"  # <-- токен прямо в коде
+ADMIN_ID = 472044641  # <-- замени на свой Telegram user ID
 PRODUCTS_FILE = "products.json"
 ORDERS_FILE = "orders.txt"
 HEADER_IMAGE = "header.jpg"
 HEADER_VIDEO = "header.mp4"
 HEADER_GIF = "header.gif"
+CONTACT_LINK = "https://t.me/YourUsername"  # <-- сюда ссылку на твой Telegram
 
 def load_products():
     if os.path.exists(PRODUCTS_FILE):
@@ -49,6 +53,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     keyboard = [[InlineKeyboardButton(p, callback_data=p)] for p in PRODUCTS]
+    keyboard.append([InlineKeyboardButton("📞 Связаться", url=CONTACT_LINK)])
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("🛒 Список товаров:", reply_markup=reply_markup)
     return SELECT_PRODUCT
@@ -190,7 +195,16 @@ async def upload_media_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     return ConversationHandler.END
 
 def main():
-    app = Application.builder().token("743563203:AAHwP9ZkApgJc8BPBZpLMuvaJT_vNs1ja-s").build()
+    app = Application.builder().token(BOT_TOKEN).build()
+
+    async def set_commands():
+        await app.bot.set_my_commands([
+            ("start", "Сделать заказ"),
+            ("cancel", "Отменить действие"),
+            ("admin", "Админ-меню"),
+        ])
+
+    app.post_init = set_commands
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
