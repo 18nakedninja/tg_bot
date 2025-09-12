@@ -186,13 +186,22 @@ def main():
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start), CommandHandler("admin", admin)],
         states={
-            SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
-            SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
+            SELECT_PRODUCT: [
+                CallbackQueryHandler(product_chosen),
+                CallbackQueryHandler(admin_handler, pattern="^(list_products|add_product|remove_product|last_orders|clear_orders)$")
+            ],
+            SELECT_QUANTITY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen),
+                CallbackQueryHandler(admin_handler, pattern="^(list_products|add_product|remove_product|last_orders|clear_orders)$")
+            ],
             ADD_PRODUCT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name),
                 CallbackQueryHandler(admin_handler, pattern="^(list_products|add_product|remove_product|last_orders|clear_orders)$")
             ],
-            REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
+            REMOVE_PRODUCT: [
+                CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$"),
+                CallbackQueryHandler(admin_handler, pattern="^(list_products|add_product|remove_product|last_orders|clear_orders)$")
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
