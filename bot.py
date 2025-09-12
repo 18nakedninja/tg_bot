@@ -19,7 +19,7 @@ CONTACT_LINK = "https://t.me/mobilike_com"
 SELECT_PRODUCT, SELECT_QUANTITY, ADD_PRODUCT, REMOVE_PRODUCT, CONFIRM_CLEAR, WAIT_MEDIA = range(6)
 
 # === ПОДКЛЮЧЕНИЕ К POSTGRESQL ===
-DATABASE_URL = os.environ.get("${{ Postgres.DATABASE_URL }}")
+DATABASE_URL = os.environ.get("postgresql://postgres:bVUsvGYRNbUYqKNdntqqngMZUWZWpYSh@postgres.railway.internal:5432/railway")
 conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
 
