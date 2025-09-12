@@ -171,10 +171,8 @@ async def run_bot(app):
             await asyncio.sleep(5)
 
 def main():
-    # создаём Application
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # ConversationHandler для всех стадий
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start), CommandHandler("admin", admin_menu)],
         states={
@@ -182,7 +180,6 @@ def main():
             SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
             ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
             REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
-            # при необходимости добавьте EDIT_PRODUCT и другие состояния
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         allow_reentry=True
@@ -192,7 +189,6 @@ def main():
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
                                          pattern="^(list_products|add_product|remove_product|last_orders|clear_orders|upload_media)$"))
 
-    # запускаем polling без asyncio.run
     print("🚀 Бот запущен! Ожидаем команды...")
     app.run_polling(poll_interval=2.0, timeout=60)
 
