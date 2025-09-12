@@ -252,8 +252,8 @@ def main():
             EDIT_PRODUCT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_name)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
-        allow_reentry=True,
-        per_message=True  # 🔧 добавили чтобы MessageHandler точно сработал
+        allow_reentry=True
+        # ❌ убрали per_message, иначе MessageHandler не отрабатывает
     )
 
     app.add_handler(conv_handler)
