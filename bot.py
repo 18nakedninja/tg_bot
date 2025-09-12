@@ -1,7 +1,7 @@
 import os
 import asyncio
 import psycopg2
-from psycopg2 import pool, IntegrityError
+from psycopg2 import IntegrityError
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -25,16 +25,13 @@ REMOVE_PRODUCT = 3
 SELECT_PRODUCT_TO_EDIT = 4
 EDIT_PRODUCT_NAME = 5
 
-# === CONNECTION POOL ===
+# === DATABASE HELPERS ===
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL не задана!")
 
-db_pool = pool.SimpleConnectionPool(1, 10, dsn=DATABASE_URL)
-
-# === DATABASE HELPERS ===
 def execute_query(query, params=None, fetch=False):
-    conn = db_pool.getconn()
+    conn = psycopg2.connect(DATABASE_URL)
     try:
         with conn.cursor() as cur:
             cur.execute(query, params)
@@ -45,7 +42,7 @@ def execute_query(query, params=None, fetch=False):
         conn.rollback()
         raise e
     finally:
-        db_pool.putconn(conn)
+        conn.close()
 
 def get_products():
     rows = execute_query("SELECT name FROM products ORDER BY id ASC", fetch=True)
@@ -206,6 +203,9 @@ async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except IntegrityError:
         await update.message.reply_text("❌ Такой товар уже есть.")
         return ADD_PRODUCT
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка БД: {e}")
+        return ADD_PRODUCT
     await update.message.reply_text(f"✅ Товар «{name}» добавлен!")
     await asyncio.sleep(0.2)
     await show_admin_menu(update, context)
@@ -217,7 +217,7 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
     name = query.data.replace("delete_", "")
     execute_query("DELETE FROM products WHERE name=%s", (name,))
     await query.edit_message_text(f"🗑 Товар «{name}» удалён.")
-    await show_admin_menu(query, context)
+    await show_admin_menu(update, context)
     return ConversationHandler.END
 
 async def select_product_to_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
