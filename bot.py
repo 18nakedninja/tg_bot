@@ -9,7 +9,7 @@ from telegram.ext import (
 )
 
 # === НАСТРОЙКИ ===
-BOT_TOKEN = os.environ.get("8342478210:AAFd3jAdENjgZ52FHmcm3jtDhkP4rpfOJLg")
+BOT_TOKEN = os.environ.get("BOT_TOKEN") or "8342478210:AAFd3jAdENjgZ52FHmcm3jtDhkP4rpfOJLg"
 if not BOT_TOKEN:
     raise ValueError("❌ BOT_TOKEN не задан! Установи его в переменных окружения.")
 
