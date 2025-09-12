@@ -1,75 +1,94 @@
 import os
+import time
+import logging
+import asyncio
 import psycopg2
 from psycopg2 import IntegrityError
-import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler,
-    MessageHandler, filters, ContextTypes, ConversationHandler
+    Application, CommandHandler, CallbackQueryHandler, MessageHandler,
+    filters, ContextTypes, ConversationHandler
 )
+
+# === ЛОГИ ===
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # === НАСТРОЙКИ ===
 BOT_TOKEN = os.environ.get("BOT_TOKEN") or "8342478210:AAFd3jAdENjgZ52FHmcm3jtDhkP4rpfOJLg"
-if not BOT_TOKEN:
-    raise ValueError("❌ BOT_TOKEN не задан! Установи его в переменных окружения.")
-
 ADMIN_ID = 472044641
+
+HEADER_IMAGE = "header.jpg"
+HEADER_VIDEO = "header.mp4"
+HEADER_GIF = "header.gif"
 CONTACT_LINK = "https://t.me/mobilike_com"
 
 # === STATES ===
-SELECT_PRODUCT = 0
-SELECT_QUANTITY = 1
-ADD_PRODUCT = 2
-REMOVE_PRODUCT = 3
-SELECT_PRODUCT_TO_EDIT = 4
-EDIT_PRODUCT_NAME = 5
+SELECT_PRODUCT, SELECT_QUANTITY, ADD_PRODUCT, REMOVE_PRODUCT, SELECT_PRODUCT_TO_EDIT, EDIT_PRODUCT_NAME = range(6)
 
-# === DATABASE HELPERS ===
+# === ПОДКЛЮЧЕНИЕ К POSTGRESQL ===
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
-    raise ValueError("❌ DATABASE_URL не задана!")
+    raise ValueError("DATABASE_URL не задана! Проверь переменные окружения на Railway.")
 
-def execute_query(query, params=None, fetch=False):
-    conn = psycopg2.connect(DATABASE_URL)
+MAX_RETRIES = 5
+for attempt in range(1, MAX_RETRIES + 1):
     try:
-        with conn.cursor() as cur:
-            cur.execute(query, params)
-            if fetch:
-                return cur.fetchall()
+        conn = psycopg2.connect(DATABASE_URL)
+        cursor = conn.cursor()
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS products(
+            id SERIAL PRIMARY KEY,
+            name TEXT UNIQUE
+        )
+        """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS orders(
+            id SERIAL PRIMARY KEY,
+            user_id TEXT,
+            username TEXT,
+            product TEXT,
+            quantity TEXT
+        )
+        """)
         conn.commit()
+        logger.info("✅ Подключение к БД успешно, таблицы проверены/созданы.")
+        break
     except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
+        logger.warning(f"❌ Ошибка подключения к БД: {e}")
+        if attempt < MAX_RETRIES:
+            logger.info(f"⏳ Повторная попытка через 3 сек... (попытка {attempt}/{MAX_RETRIES})")
+            time.sleep(3)
+        else:
+            raise RuntimeError("❌ Не удалось подключиться к базе данных после нескольких попыток.")
 
+# === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 def get_products():
-    rows = execute_query("SELECT name FROM products ORDER BY id ASC", fetch=True)
-    return [r[0] for r in rows]
+    cursor.execute("SELECT name FROM products ORDER BY id ASC")
+    return [row[0] for row in cursor.fetchall()]
 
-# === CREATE TABLES ===
-execute_query("""
-CREATE TABLE IF NOT EXISTS products(
-    id SERIAL PRIMARY KEY,
-    name TEXT UNIQUE
-)
-""")
-execute_query("""
-CREATE TABLE IF NOT EXISTS orders(
-    id SERIAL PRIMARY KEY,
-    user_id TEXT,
-    username TEXT,
-    product TEXT,
-    quantity TEXT
-)
-""")
-
-# === CLIENT SIDE ===
+# === КЛИЕНТСКАЯ ЧАСТЬ ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if os.path.exists(HEADER_VIDEO):
+        with open(HEADER_VIDEO, "rb") as v:
+            await update.message.reply_video(v, caption="Выберите товар:")
+    elif os.path.exists(HEADER_GIF):
+        with open(HEADER_GIF, "rb") as g:
+            await update.message.reply_animation(g, caption="Выберите товар:")
+    elif os.path.exists(HEADER_IMAGE):
+        with open(HEADER_IMAGE, "rb") as img:
+            await update.message.reply_photo(img, caption="Выберите товар:")
+    else:
+        await update.message.reply_text("Выберите товар:")
+
     products = get_products()
     if not products:
         await update.message.reply_text("Список товаров пуст. Администратор должен его заполнить.")
         return ConversationHandler.END
+
     keyboard = [[InlineKeyboardButton(p, callback_data=p)] for p in products]
     keyboard.append([InlineKeyboardButton("📞 Связаться", url=CONTACT_LINK)])
     await update.message.reply_text("🛒 Список товаров:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -83,195 +102,91 @@ async def product_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return SELECT_QUANTITY
 
 async def quantity_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    product = context.user_data.get("product")
+    product = context.user_data["product"]
     quantity = update.message.text
     user = update.message.from_user
 
-    try:
-        execute_query(
-            "INSERT INTO orders(user_id, username, product, quantity) VALUES (%s, %s, %s, %s)",
-            (str(user.id), user.username or "", product, quantity)
-        )
-    except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка БД: {e}")
-        return ConversationHandler.END
+    cursor.execute(
+        "INSERT INTO orders(user_id, username, product, quantity) VALUES (%s, %s, %s, %s)",
+        (str(user.id), user.username or "", product, quantity)
+    )
+    conn.commit()
 
     await update.message.reply_text(f"✅ Ваш заказ на {quantity} × {product} принят!")
-    await context.bot.send_message(chat_id=ADMIN_ID,
-                                   text=f"📦 Новый заказ!\n👤 @{user.username or user.id}\n🛒 {product}\n🔢 Кол-во: {quantity}")
+    admin_message = f"📦 Новый заказ!\n👤 @{user.username or user.id}\n🛒 {product}\n🔢 Кол-во: {quantity}"
+    await context.bot.send_message(chat_id=ADMIN_ID, text=admin_message)
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Действие отменено.")
     return ConversationHandler.END
 
-# === ADMIN PANEL ===
-async def show_admin_menu(update_or_query, context):
+# === АДМИН-МЕНЮ ===
+async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.from_user.id != ADMIN_ID:
+        return
     keyboard = [
         [InlineKeyboardButton("📋 Список товаров", callback_data="list_products")],
         [InlineKeyboardButton("➕ Добавить товар", callback_data="add_product")],
         [InlineKeyboardButton("🗑 Удалить товар", callback_data="remove_product")],
         [InlineKeyboardButton("✏️ Редактировать товар", callback_data="edit_product")],
         [InlineKeyboardButton("📦 Последние заказы", callback_data="last_orders")],
-        [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
+        [InlineKeyboardButton("🧹 Очистить заказы", callback_data="clear_orders")],
+        [InlineKeyboardButton("🖼 Загрузить обложку", callback_data="upload_media")]
     ]
-    text = "⚙️ <b>Админ-панель</b>\n\nВыберите действие:"
-    if isinstance(update_or_query, Update):
-        await update_or_query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-    else:
-        await update_or_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+    await update.message.reply_text("⚙️ Админ-панель:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.from_user.id != ADMIN_ID:
-        return ConversationHandler.END
-    await show_admin_menu(update, context)
-    return ConversationHandler.END
-
-async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-
-    if data == "list_products":
-        products = get_products()
-        text = "📋 Список товаров:\n" + "\n".join(f"• {p}" for p in products) if products else "⚠️ Список пуст."
-        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin_back")]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-
-    elif data == "add_product":
-        await query.edit_message_text("✏️ Введите название нового товара:")
-        return ADD_PRODUCT
-
-    elif data == "remove_product":
-        products = get_products()
-        if not products:
-            await query.edit_message_text("⚠️ Список товаров пуст.")
-            return ConversationHandler.END
-        keyboard = [[InlineKeyboardButton(f"🗑 {p}", callback_data=f"delete_{p}")] for p in products]
-        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="admin_back")])
-        await query.edit_message_text("Выберите товар для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
-        return REMOVE_PRODUCT
-
-    elif data == "edit_product":
-        products = get_products()
-        if not products:
-            await query.edit_message_text("⚠️ Список товаров пуст.")
-            return ConversationHandler.END
-        keyboard = [[InlineKeyboardButton(f"✏️ {p}", callback_data=f"edit_{p}")] for p in products]
-        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="admin_back")])
-        await query.edit_message_text("Выберите товар для редактирования:", reply_markup=InlineKeyboardMarkup(keyboard))
-        return SELECT_PRODUCT_TO_EDIT
-
-    elif data == "last_orders":
-        orders = execute_query("SELECT user_id, username, product, quantity FROM orders ORDER BY id DESC LIMIT 5", fetch=True)
-        text = "📦 Последние заказы:\n\n" + "".join(f"👤 @{u[1] or u[0]}: {u[3]} × {u[2]}\n" for u in orders) if orders else "📦 Заказов пока нет."
-        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin_back")]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-
-    elif data == "stats":
-        total_orders = execute_query("SELECT COUNT(*) FROM orders", fetch=True)[0][0]
-        total_products = execute_query("SELECT COUNT(*) FROM products", fetch=True)[0][0]
-        text = f"📊 Статистика:\n📦 Заказов: {total_orders}\n📋 Товаров: {total_products}"
-        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin_back")]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-
-    elif data == "admin_back":
-        await show_admin_menu(query, context)
-
-# === ADD / REMOVE / EDIT PRODUCT ===
+# === ДОБАВЛЕНИЕ / УДАЛЕНИЕ ТОВАРОВ ===
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    name = update.message.text.strip()
+    if not name:
+        await update.message.reply_text("❌ Название товара не может быть пустым.")
+        return ADD_PRODUCT
     try:
-        print("📥 [DEBUG] add_product_name вызван!")  # лог в Railway
-        name = update.message.text.strip()
-        print(f"📥 [DEBUG] Пользователь ввёл: {name}")
-
-        if not name:
-            await update.message.reply_text("❌ Название товара не может быть пустым.")
-            return ADD_PRODUCT
-
-        # Пишем в базу
         cursor.execute("INSERT INTO products(name) VALUES (%s)", (name,))
         conn.commit()
-        print("✅ [DEBUG] Успешно добавили в БД")
-
         await update.message.reply_text(f"✅ Товар «{name}» добавлен!")
-        return ConversationHandler.END
-
-    except Exception as e:
+    except IntegrityError:
         conn.rollback()
-        print(f"❌ [DEBUG] Ошибка при добавлении товара: {e}")
-        await update.message.reply_text(f"❌ Ошибка при добавлении: {e}")
-        return ConversationHandler.END
+        await update.message.reply_text("❌ Такой товар уже есть.")
+    return ConversationHandler.END
 
 async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     name = query.data.replace("delete_", "")
-    execute_query("DELETE FROM products WHERE name=%s", (name,))
+    cursor.execute("DELETE FROM products WHERE name=%s", (name,))
+    conn.commit()
     await query.edit_message_text(f"🗑 Товар «{name}» удалён.")
-    await show_admin_menu(update, context)
-    return ConversationHandler.END
-
-async def select_product_to_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    context.user_data["edit_product"] = query.data.replace("edit_", "")
-    await query.edit_message_text(f"✏️ Введите новое имя для товара «{context.user_data['edit_product']}»:")
-    return EDIT_PRODUCT_NAME
-
-async def edit_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    new_name = update.message.text.strip()
-    old_name = context.user_data.get("edit_product")
-    if not old_name or not new_name:
-        await update.message.reply_text("❌ Ошибка: неверное имя.")
-        return EDIT_PRODUCT_NAME
-    try:
-        execute_query("UPDATE products SET name=%s WHERE name=%s", (new_name, old_name))
-    except IntegrityError:
-        await update.message.reply_text("❌ Товар с таким названием уже существует.")
-        return EDIT_PRODUCT_NAME
-    await update.message.reply_text(f"✅ Товар «{old_name}» переименован в «{new_name}».")
-    await show_admin_menu(update, context)
     return ConversationHandler.END
 
 # === MAIN ===
+async def run_bot(app):
+    while True:
+        try:
+            logger.info("🚀 Запускаем polling...")
+            await app.run_polling(poll_interval=2.0)
+        except Exception as e:
+            logger.error(f"🔥 Ошибка polling: {e}")
+            await asyncio.sleep(5)
+
 def main():
-    try:
-        app = Application.builder().token(BOT_TOKEN).build()
-    except Exception as e:
-        print(f"❌ Ошибка при запуске бота: {e}")
-        return
+    app = Application.builder().token(BOT_TOKEN).build()
 
     conv_handler = ConversationHandler(
-        entry_points=[
-            CommandHandler("start", start),
-            CommandHandler("admin", admin_menu)
-        ],
+        entry_points=[CommandHandler("start", start), CommandHandler("admin", admin_menu)],
         states={
             SELECT_PRODUCT: [CallbackQueryHandler(product_chosen)],
             SELECT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen)],
             ADD_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name)],
             REMOVE_PRODUCT: [CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$")],
-            SELECT_PRODUCT_TO_EDIT: [CallbackQueryHandler(select_product_to_edit, pattern="^edit_.*$")],
-            EDIT_PRODUCT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_product_name)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
-        allow_reentry=True  # ✅ можно повторно заходить в состояние
-        # ❌ убрали per_message, иначе MessageHandler не отрабатывает
+        allow_reentry=True
     )
 
-    # Регистрируем обработчики
     app.add_handler(conv_handler)
-    app.add_handler(
-        CallbackQueryHandler(
-            admin_menu_handler,
-            pattern="^(list_products|add_product|remove_product|edit_product|last_orders|stats|admin_back)$"
-        )
-    )
-
-    print("🚀 Бот запущен! Ожидаем команды...")
-    app.run_polling()
+    asyncio.run(run_bot(app))
 
 if __name__ == "__main__":
     main()
-
