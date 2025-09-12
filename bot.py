@@ -125,7 +125,7 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     elif data == "add_product":
         await query.edit_message_text("Введите название нового товара:")
-        return ADD_PRODUCT
+        return ADD_PRODUCT  # ✅ Возвращаем состояние
 
     elif data == "remove_product":
         products = get_products()
@@ -134,7 +134,7 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return ConversationHandler.END
         keyboard = [[InlineKeyboardButton(f"🗑 {p}", callback_data=f"delete_{p}")] for p in products]
         await query.edit_message_text("Выберите товар для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
-        return REMOVE_PRODUCT
+        return REMOVE_PRODUCT  # ✅ Возвращаем состояние
 
     elif data == "last_orders":
         cursor.execute("SELECT user_id, username, product, quantity FROM orders ORDER BY id DESC LIMIT 5")
