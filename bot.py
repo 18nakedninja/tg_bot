@@ -133,8 +133,8 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text(text)
 
     elif data == "add_product":
-        await query.edit_message_text("✏️ Введите название нового товара:")
-        return ADD_PRODUCT
+         context.user_data["waiting_for_product"] = True
+         await query.edit_message_text("✏️ Введите название нового товара:")
 
     elif data == "remove_product":
         products = get_products()
@@ -146,10 +146,14 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return REMOVE_PRODUCT
 
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get("waiting_for_product"):
+        return  # Игнорируем сообщения, если мы не в режиме добавления товара
+
     name = update.message.text.strip()
     if not name:
         await update.message.reply_text("❌ Название товара не может быть пустым.")
-        return ADD_PRODUCT
+        return
+
     try:
         cursor.execute("INSERT INTO products(name) VALUES (%s)", (name,))
         conn.commit()
@@ -157,7 +161,8 @@ async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except IntegrityError:
         conn.rollback()
         await update.message.reply_text("❌ Такой товар уже есть.")
-    return ConversationHandler.END
+
+    context.user_data["waiting_for_product"] = False
 
 async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
