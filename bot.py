@@ -141,19 +141,26 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
+    # --- Клиентские хендлеры ---
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(product_chosen, pattern="^product_"))
 
     async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Маршрутизатор текста: определяем, что пользователь вводит"""
         if context.user_data.get("admin_mode") == "add_product":
             await add_product_name(update, context)
-        elif "product" in context.user_data:
+            return
+
+        if "product" in context.user_data:
+            # Считаем, что текст после выбора товара — это телефон
             await phone_chosen(update, context)
-        else:
-            await update.message.reply_text("⚠️ Непонятная команда. Используйте /start или /admin")
+            return
+
+        await update.message.reply_text("⚠️ Непонятная команда. Используйте /start или /admin")
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_router))
 
+    # --- Админские хендлеры ---
     app.add_handler(CommandHandler("admin", admin_menu))
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
                                          pattern="^(list_products|add_product|remove_product)$"))
