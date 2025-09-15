@@ -26,7 +26,7 @@ cursor.execute("""CREATE TABLE IF NOT EXISTS orders(
     user_id TEXT,
     username TEXT,
     product TEXT,
-    quantity TEXT
+    phone TEXT
 )""")
 conn.commit()
 
@@ -53,25 +53,25 @@ async def product_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     product = query.data.replace("product_", "")
     context.user_data["product"] = product
-    await query.edit_message_text(f"Вы выбрали: {product}\n\nВведите количество:")
+    await query.edit_message_text(f"Вы выбрали: {product}\n\nВведите ваш номер телефона:")
 
-async def quantity_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def phone_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "product" not in context.user_data:
-        return  # игнорируем если товар не выбран
+        return  # игнорируем, если товар не выбран
     product = context.user_data["product"]
-    quantity = update.message.text.strip()
+    phone = update.message.text.strip()
     user = update.message.from_user
 
     cursor.execute(
-        "INSERT INTO orders(user_id, username, product, quantity) VALUES (%s, %s, %s, %s)",
-        (str(user.id), user.username or "", product, quantity)
+        "INSERT INTO orders(user_id, username, product, phone) VALUES (%s, %s, %s, %s)",
+        (str(user.id), user.username or "", product, phone)
     )
     conn.commit()
 
-    await update.message.reply_text(f"✅ Ваш заказ на {quantity} × {product} принят!")
+    await update.message.reply_text(f"✅ Спасибо! Ваш заказ принят.\n📞 Телефон: {phone}\n🛒 Товар: {product}")
     await context.bot.send_message(
         chat_id=ADMIN_ID,
-        text=f"📦 Новый заказ!\n👤 @{user.username or user.id}\n🛒 {product}\n🔢 Кол-во: {quantity}"
+        text=f"📦 Новый заказ!\n👤 @{user.username or user.id}\n🛒 {product}\n📞 Телефон: {phone}"
     )
     context.user_data.clear()
 
@@ -147,7 +147,7 @@ def main():
         if context.user_data.get("admin_mode") == "add_product":
             await add_product_name(update, context)
         elif "product" in context.user_data:
-            await quantity_chosen(update, context)
+            await phone_chosen(update, context)
         else:
             await update.message.reply_text("⚠️ Непонятная команда. Используйте /start или /admin")
 
@@ -158,7 +158,6 @@ def main():
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
                                          pattern="^(list_products|add_product|remove_product)$"))
     app.add_handler(CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$"))
-
 
     print("🚀 Бот запущен! Ожидаем команды...")
     app.run_polling()
