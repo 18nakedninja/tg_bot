@@ -16,7 +16,6 @@ if not DATABASE_URL:
 
 # ================= ФУНКЦИИ РАБОТЫ С БД =================
 def execute_query(query, params=None, fetch=False):
-    """Универсальная функция для выполнения запросов."""
     conn = psycopg2.connect(DATABASE_URL, sslmode="require")
     cursor = conn.cursor()
     cursor.execute(query, params or ())
@@ -61,11 +60,22 @@ async def product_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     product = query.data.replace("product_", "")
     context.user_data["product"] = product
-    await query.edit_message_text(f"Вы выбрали: {product}\n\nВведите свой номер телефона для оформления заказа:")
+
+    keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel_order")]]
+    await query.edit_message_text(
+        f"Вы выбрали: {product}\n\nВведите свой номер телефона для оформления заказа:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data.clear()
+    await query.edit_message_text("❌ Заказ отменён. Вы можете выбрать товар заново командой /start")
 
 async def phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "product" not in context.user_data:
-        return  # игнорируем если товар не выбран
+        return
 
     product = context.user_data["product"]
     phone = update.message.text.strip()
@@ -76,7 +86,11 @@ async def phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
         (str(user.id), user.username or "", product, phone)
     )
 
-    await update.message.reply_text(f"✅ Ваш заказ на {product} принят! Мы свяжемся с вами по номеру {phone}.")
+    keyboard = [[InlineKeyboardButton("📞 Связаться с менеджером", url="https://t.me/mobilike_com")]]
+    await update.message.reply_text(
+        f"✅ Ваш заказ на {product} принят!\n📞 Мы свяжемся с вами по номеру: {phone}",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=f"📦 Новый заказ!\n👤 @{user.username or user.id}\n🛒 {product}\n📞 Телефон: {phone}"
@@ -92,6 +106,7 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📋 Список товаров", callback_data="list_products")],
         [InlineKeyboardButton("➕ Добавить товар", callback_data="add_product")],
         [InlineKeyboardButton("🗑 Удалить товар", callback_data="remove_product")],
+        [InlineKeyboardButton("📦 Список заказов", callback_data="list_orders")],
     ]
     await update.message.reply_text("⚙️ Админ-меню:", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -105,6 +120,21 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         text = "📋 Список товаров:\n" + "\n".join(f"• {p}" for p in products) if products else "⚠️ Список пуст."
         await query.edit_message_text(text)
 
+    elif data == "list_orders":
+        orders = execute_query("SELECT id, username, product, phone FROM orders ORDER BY id DESC", fetch=True)
+        if not orders:
+            await query.edit_message_text("⚠️ Заказов пока нет.")
+            return
+
+        text = "📦 Последние заказы:\n\n"
+        keyboard = []
+        for oid, username, product, phone in orders:
+            text += f"🆔 {oid}\n👤 @{username or 'Без ника'}\n🛒 {product}\n📞 {phone}\n\n"
+            keyboard.append([InlineKeyboardButton(f"🗑 Удалить заказ {oid}", callback_data=f"delete_order_{oid}")])
+
+        keyboard.append([InlineKeyboardButton("🔄 Обновить", callback_data="list_orders")])
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
     elif data == "add_product":
         context.user_data["admin_mode"] = "add_product"
         await query.edit_message_text("✏️ Введите название нового товара:")
@@ -116,6 +146,13 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
         keyboard = [[InlineKeyboardButton(f"🗑 {p}", callback_data=f"delete_{p}")] for p in products]
         await query.edit_message_text("Выберите товар для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def delete_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    order_id = int(query.data.replace("delete_order_", ""))
+    execute_query("DELETE FROM orders WHERE id = %s", (order_id,))
+    await query.edit_message_text(f"✅ Заказ №{order_id} удалён.")
 
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("admin_mode") == "add_product":
@@ -144,9 +181,10 @@ def main():
 
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Клиентские хендлеры
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(product_chosen, pattern="^product_"))
+    app.add_handler(CallbackQueryHandler(cancel_order, pattern="^cancel_order$"))
+    app.add_handler(CallbackQueryHandler(delete_order, pattern="^delete_order_.*$"))
 
     async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if context.user_data.get("admin_mode") == "add_product":
@@ -159,7 +197,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_router))
 
     app.add_handler(CommandHandler("admin", admin_menu))
-    app.add_handler(CallbackQueryHandler(admin_menu_handler, pattern="^(list_products|add_product|remove_product)$"))
+    app.add_handler(CallbackQueryHandler(admin_menu_handler, pattern="^(list_products|add_product|remove_product|list_orders)$"))
     app.add_handler(CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$"))
 
     print("🚀 Бот запущен! Ожидаем команды...")
