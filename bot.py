@@ -125,12 +125,21 @@ async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ================== MAIN ==================
+
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
+    # Клиент
     # Хендлеры
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(product_chosen, pattern="^product_"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen))
+
+    # Админ
     app.add_handler(CommandHandler("admin", admin_menu))
+    app.add_handler(CallbackQueryHandler(admin_menu_handler, pattern="^(list_products|admin_add|admin_remove)$"))
+    app.add_handler(CallbackQueryHandler(remove_product_handler, pattern="^delete_"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, admin_text_handler))
 
     # Ловим callback-кнопки из админ-меню
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
@@ -139,11 +148,5 @@ def main():
     # Ловим любые текстовые сообщения админа, чтобы добавить товар
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name))
 
-    # 🔑 Отдельный обработчик удаления товара (НОВЫЙ)
-    app.add_handler(CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$"))
-
     print("🚀 Бот запущен! Ожидаем команды...")
     app.run_polling()
-
-if __name__ == "__main__":
-    main()
