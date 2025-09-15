@@ -29,7 +29,8 @@ def init_db():
     execute_query("""
     CREATE TABLE IF NOT EXISTS products(
         id SERIAL PRIMARY KEY,
-        name TEXT UNIQUE NOT NULL
+        name TEXT UNIQUE NOT NULL,
+        photo_id TEXT
     )""")
     execute_query("""
     CREATE TABLE IF NOT EXISTS orders(
@@ -39,39 +40,48 @@ def init_db():
         product TEXT,
         phone TEXT
     )""")
+    execute_query("""
+    CREATE TABLE IF NOT EXISTS settings(
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        type TEXT
+    )""")
 
 def get_products():
-    rows = execute_query("SELECT name FROM products ORDER BY id ASC", fetch=True)
-    return [row[0] for row in rows]
+    rows = execute_query("SELECT name, photo_id FROM products ORDER BY id ASC", fetch=True)
+    return rows
 
 # ================= КЛИЕНТСКАЯ ЧАСТЬ =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Заглавное медиа (если установлено)
+    header = execute_query("SELECT value, type FROM settings WHERE key='header_media'", fetch=True)
+    if header:
+        media_id, media_type = header[0]
+        if media_type == "photo":
+            await update.message.reply_photo(photo=media_id, caption="Добро пожаловать 🛍")
+        elif media_type == "video":
+            await update.message.reply_video(video=media_id, caption="Добро пожаловать 🛍")
+        elif media_type == "animation":
+            await update.message.reply_animation(animation=media_id, caption="Добро пожаловать 🛍")
+
     products = get_products()
     if not products:
         await update.message.reply_text("Список товаров пуст. Администратор должен его заполнить.")
         return
 
-    keyboard = [[InlineKeyboardButton(p, callback_data=f"product_{p}")] for p in products]
-    keyboard.append([InlineKeyboardButton("📞 Связаться", url="https://t.me/mobilike_com")])
-    await update.message.reply_text("🛒 Список товаров:", reply_markup=InlineKeyboardMarkup(keyboard))
+    for name, photo_id in products:
+        keyboard = [[InlineKeyboardButton(f"🛒 Купить {name}", callback_data=f"product_{name}")]]
+        if photo_id:
+            await update.message.reply_photo(photo=photo_id, caption=f"📦 {name}", reply_markup=InlineKeyboardMarkup(keyboard))
+        else:
+            await update.message.reply_text(f"📦 {name}", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def product_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     product = query.data.replace("product_", "")
     context.user_data["product"] = product
-
-    keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel_order")]]
-    await query.edit_message_text(
-        f"Вы выбрали: {product}\n\nВведите свой номер телефона для оформления заказа:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    context.user_data.clear()
-    await query.edit_message_text("❌ Заказ отменён. Вы можете выбрать товар заново командой /start")
+    await query.edit_message_text(f"Вы выбрали: {product}\n\nВведите свой номер телефона для оформления заказа:")
 
 async def phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "product" not in context.user_data:
@@ -86,11 +96,7 @@ async def phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
         (str(user.id), user.username or "", product, phone)
     )
 
-    keyboard = [[InlineKeyboardButton("📞 Связаться с менеджером", url="https://t.me/mobilike_com")]]
-    await update.message.reply_text(
-        f"✅ Ваш заказ на {product} принят!\n📞 Мы свяжемся с вами по номеру: {phone}",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    await update.message.reply_text(f"✅ Ваш заказ на {product} принят! Мы свяжемся с вами по номеру {phone}.")
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=f"📦 Новый заказ!\n👤 @{user.username or user.id}\n🛒 {product}\n📞 Телефон: {phone}"
@@ -106,7 +112,7 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📋 Список товаров", callback_data="list_products")],
         [InlineKeyboardButton("➕ Добавить товар", callback_data="add_product")],
         [InlineKeyboardButton("🗑 Удалить товар", callback_data="remove_product")],
-        [InlineKeyboardButton("📦 Список заказов", callback_data="list_orders")],
+        [InlineKeyboardButton("🖼 Установить заглавное медиа", callback_data="set_header_media")],
     ]
     await update.message.reply_text("⚙️ Админ-меню:", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -117,23 +123,8 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if data == "list_products":
         products = get_products()
-        text = "📋 Список товаров:\n" + "\n".join(f"• {p}" for p in products) if products else "⚠️ Список пуст."
+        text = "📋 Список товаров:\n" + "\n".join(f"• {p[0]}" for p in products) if products else "⚠️ Список пуст."
         await query.edit_message_text(text)
-
-    elif data == "list_orders":
-        orders = execute_query("SELECT id, username, product, phone FROM orders ORDER BY id DESC", fetch=True)
-        if not orders:
-            await query.edit_message_text("⚠️ Заказов пока нет.")
-            return
-
-        text = "📦 Последние заказы:\n\n"
-        keyboard = []
-        for oid, username, product, phone in orders:
-            text += f"🆔 {oid}\n👤 @{username or 'Без ника'}\n🛒 {product}\n📞 {phone}\n\n"
-            keyboard.append([InlineKeyboardButton(f"🗑 Удалить заказ {oid}", callback_data=f"delete_order_{oid}")])
-
-        keyboard.append([InlineKeyboardButton("🔄 Обновить", callback_data="list_orders")])
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif data == "add_product":
         context.user_data["admin_mode"] = "add_product"
@@ -144,15 +135,12 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if not products:
             await query.edit_message_text("⚠️ Список товаров пуст.")
             return
-        keyboard = [[InlineKeyboardButton(f"🗑 {p}", callback_data=f"delete_{p}")] for p in products]
+        keyboard = [[InlineKeyboardButton(f"🗑 {p[0]}", callback_data=f"delete_{p[0]}")] for p in products]
         await query.edit_message_text("Выберите товар для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-async def delete_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    order_id = int(query.data.replace("delete_order_", ""))
-    execute_query("DELETE FROM orders WHERE id = %s", (order_id,))
-    await query.edit_message_text(f"✅ Заказ №{order_id} удалён.")
+    elif data == "set_header_media":
+        context.user_data["admin_mode"] = "set_header"
+        await query.edit_message_text("📷 Отправьте фото / 🎥 видео / 🖼 гиф для заглавной части магазина.")
 
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("admin_mode") == "add_product":
@@ -174,6 +162,32 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
     execute_query("DELETE FROM products WHERE name = %s", (product_name,))
     await query.edit_message_text(f"✅ Товар «{product_name}» удалён.")
 
+async def set_header_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get("admin_mode") == "set_header":
+        media_id, media_type = None, None
+
+        if update.message.photo:
+            media_id = update.message.photo[-1].file_id
+            media_type = "photo"
+        elif update.message.video:
+            media_id = update.message.video.file_id
+            media_type = "video"
+        elif update.message.animation:
+            media_id = update.message.animation.file_id
+            media_type = "animation"
+        else:
+            await update.message.reply_text("❌ Поддерживаются только фото, видео и GIF.")
+            return
+
+        execute_query(
+            "INSERT INTO settings (key, value, type) VALUES ('header_media', %s, %s) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, type = EXCLUDED.type",
+            (media_id, media_type)
+        )
+
+        await update.message.reply_text("✅ Заглавное медиа обновлено!")
+        context.user_data.pop("admin_mode", None)
+
 # ================== MAIN ==================
 def main():
     init_db()
@@ -181,23 +195,24 @@ def main():
 
     app = Application.builder().token(BOT_TOKEN).build()
 
+    # Клиентские хендлеры
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(product_chosen, pattern="^product_"))
-    app.add_handler(CallbackQueryHandler(cancel_order, pattern="^cancel_order$"))
-    app.add_handler(CallbackQueryHandler(delete_order, pattern="^delete_order_.*$"))
 
     async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if context.user_data.get("admin_mode") == "add_product":
             await add_product_name(update, context)
+        elif context.user_data.get("admin_mode") == "set_header":
+            await set_header_media(update, context)
         elif "product" in context.user_data:
             await phone_received(update, context)
         else:
             await update.message.reply_text("⚠️ Непонятная команда. Используйте /start или /admin")
 
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_router))
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, text_router))
 
     app.add_handler(CommandHandler("admin", admin_menu))
-    app.add_handler(CallbackQueryHandler(admin_menu_handler, pattern="^(list_products|add_product|remove_product|list_orders)$"))
+    app.add_handler(CallbackQueryHandler(admin_menu_handler, pattern="^(list_products|add_product|remove_product|set_header_media)$"))
     app.add_handler(CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$"))
 
     print("🚀 Бот запущен! Ожидаем команды...")
