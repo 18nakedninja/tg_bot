@@ -26,7 +26,7 @@ cursor.execute("""CREATE TABLE IF NOT EXISTS orders(
     user_id TEXT,
     username TEXT,
     product TEXT,
-    quantity TEXT
+    phone TEXT
 )""")
 conn.commit()
 
@@ -53,25 +53,30 @@ async def product_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     product = query.data.replace("product_", "")
     context.user_data["product"] = product
-    await query.edit_message_text(f"Вы выбрали: {product}\n\nВведите количество:")
+    await query.edit_message_text(f"Вы выбрали: {product}\n\nВведите свой номер телефона 📱:")
 
-async def quantity_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def phone_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "product" not in context.user_data:
         return  # игнорируем если товар не выбран
     product = context.user_data["product"]
-    quantity = update.message.text.strip()
+    phone = update.message.text.strip()
     user = update.message.from_user
 
+    # Простая проверка, что телефон похож на номер
+    if not (phone.replace("+", "").isdigit() and 7 <= len(phone.replace("+", "")) <= 15):
+        await update.message.reply_text("❌ Пожалуйста, введите корректный номер телефона.")
+        return
+
     cursor.execute(
-        "INSERT INTO orders(user_id, username, product, quantity) VALUES (%s, %s, %s, %s)",
-        (str(user.id), user.username or "", product, quantity)
+        "INSERT INTO orders(user_id, username, product, phone) VALUES (%s, %s, %s, %s)",
+        (str(user.id), user.username or "", product, phone)
     )
     conn.commit()
 
-    await update.message.reply_text(f"✅ Ваш заказ на {quantity} × {product} принят!")
+    await update.message.reply_text(f"✅ Спасибо! Ваш заказ на «{product}» принят!\nМы свяжемся с вами по номеру: {phone}")
     await context.bot.send_message(
         chat_id=ADMIN_ID,
-        text=f"📦 Новый заказ!\n👤 @{user.username or user.id}\n🛒 {product}\n🔢 Кол-во: {quantity}"
+        text=f"📦 Новый заказ!\n👤 @{user.username or user.id}\n🛒 {product}\n📱 Телефон: {phone}"
     )
     context.user_data.clear()
 
@@ -110,7 +115,6 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text("Выберите товар для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает ввод текста админом — добавляет товар, если активен режим add_product"""
     if context.user_data.get("admin_mode") == "add_product":
         name = update.message.text.strip()
         if not name:
@@ -126,7 +130,6 @@ async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("admin_mode", None)
 
 async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Удаляет товар из БД"""
     query = update.callback_query
     await query.answer()
     product_name = query.data.replace("delete_", "")
@@ -138,27 +141,23 @@ async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_T
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Клиентские хендлеры
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(product_chosen, pattern="^product_"))
 
-    # Один общий MessageHandler для текстов — проверяем внутри, что именно делать
     async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if context.user_data.get("admin_mode") == "add_product":
             await add_product_name(update, context)
         elif "product" in context.user_data:
-            await quantity_chosen(update, context)
+            await phone_chosen(update, context)
         else:
             await update.message.reply_text("⚠️ Непонятная команда. Используйте /start или /admin")
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_router))
 
-    # Админские хендлеры
     app.add_handler(CommandHandler("admin", admin_menu))
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
                                          pattern="^(list_products|add_product|remove_product)$"))
     app.add_handler(CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$"))
-
 
     print("🚀 Бот запущен! Ожидаем команды...")
     app.run_polling()
