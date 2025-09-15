@@ -141,14 +141,24 @@ def main():
     # Клиентские хендлеры
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(product_chosen, pattern="^product_"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen))
+
+    # Один общий MessageHandler для текстов — проверяем внутри, что именно делать
+    async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if context.user_data.get("admin_mode") == "add_product":
+            await add_product_name(update, context)
+        elif "product" in context.user_data:
+            await quantity_chosen(update, context)
+        else:
+            await update.message.reply_text("⚠️ Непонятная команда. Используйте /start или /admin")
+
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_router))
 
     # Админские хендлеры
     app.add_handler(CommandHandler("admin", admin_menu))
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
                                          pattern="^(list_products|add_product|remove_product)$"))
     app.add_handler(CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name))
+
 
     print("🚀 Бот запущен! Ожидаем команды...")
     app.run_polling()
