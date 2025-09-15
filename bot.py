@@ -57,18 +57,22 @@ async def product_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def quantity_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "product" not in context.user_data:
-        return
+        return  # игнорируем если товар не выбран
     product = context.user_data["product"]
-    quantity = update.message.text
+    quantity = update.message.text.strip()
     user = update.message.from_user
 
-    cursor.execute("INSERT INTO orders(user_id, username, product, quantity) VALUES (%s, %s, %s, %s)",
-                   (str(user.id), user.username or "", product, quantity))
+    cursor.execute(
+        "INSERT INTO orders(user_id, username, product, quantity) VALUES (%s, %s, %s, %s)",
+        (str(user.id), user.username or "", product, quantity)
+    )
     conn.commit()
 
     await update.message.reply_text(f"✅ Ваш заказ на {quantity} × {product} принят!")
-    await context.bot.send_message(chat_id=ADMIN_ID,
-                                   text=f"📦 Новый заказ!\n👤 @{user.username or user.id}\n🛒 {product}\n🔢 Кол-во: {quantity}")
+    await context.bot.send_message(
+        chat_id=ADMIN_ID,
+        text=f"📦 Новый заказ!\n👤 @{user.username or user.id}\n🛒 {product}\n🔢 Кол-во: {quantity}"
+    )
     context.user_data.clear()
 
 # ================== АДМИН ==================
@@ -82,7 +86,6 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🗑 Удалить товар", callback_data="remove_product")],
     ]
     await update.message.reply_text("⚙️ Админ-меню:", reply_markup=InlineKeyboardMarkup(keyboard))
-
 
 async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -106,7 +109,6 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         keyboard = [[InlineKeyboardButton(f"🗑 {p}", callback_data=f"delete_{p}")] for p in products]
         await query.edit_message_text("Выберите товар для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обрабатывает ввод текста админом — добавляет товар, если активен режим add_product"""
     if context.user_data.get("admin_mode") == "add_product":
@@ -123,20 +125,29 @@ async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Такой товар уже есть.")
         context.user_data.pop("admin_mode", None)
 
+async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Удаляет товар из БД"""
+    query = update.callback_query
+    await query.answer()
+    product_name = query.data.replace("delete_", "")
+    cursor.execute("DELETE FROM products WHERE name = %s", (product_name,))
+    conn.commit()
+    await query.edit_message_text(f"✅ Товар «{product_name}» удалён.")
 
 # ================== MAIN ==================
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Хендлеры
+    # Клиентские хендлеры
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(product_chosen, pattern="^product_"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, quantity_chosen))
+
+    # Админские хендлеры
     app.add_handler(CommandHandler("admin", admin_menu))
-
-    # Ловим callback-кнопки из админ-меню
     app.add_handler(CallbackQueryHandler(admin_menu_handler,
-                                         pattern="^(list_products|add_product|remove_product|delete_.*)$"))
-
-    # Ловим любые текстовые сообщения админа, чтобы добавить товар
+                                         pattern="^(list_products|add_product|remove_product)$"))
+    app.add_handler(CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, add_product_name))
 
     print("🚀 Бот запущен! Ожидаем команды...")
