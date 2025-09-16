@@ -75,8 +75,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Список товаров пуст. Администратор должен его заполнить.")
         return
 
-    keyboard = [[InlineKeyboardButton(p, callback_data=f"product_{p}")] for p in products]
+    # ✅ Делаем кнопки в 2 ряда
+    keyboard = []
+    row = []
+    for i, p in enumerate(products, start=1):
+        row.append(InlineKeyboardButton(p, callback_data=f"product_{p}"))
+        if i % 2 == 0:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+
     keyboard.append([InlineKeyboardButton("📞 Связаться", url="https://t.me/mobilike_com")])
+
     await update.message.reply_text("Выберите товар:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def product_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
