@@ -7,7 +7,7 @@ from telegram.ext import (
     MessageHandler, filters, ContextTypes
 )
 
-BOT_TOKEN = "8342478210:AAFd3jAdENjgZ52FHmcm3jtDhkP4rpfOJLg"
+BOT_TOKEN = "ТВОЙ_ТОКЕН"
 ADMIN_ID = 472044641  
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -40,9 +40,10 @@ def init_db():
         phone TEXT
     )""")
     execute_query("""
-    CREATE TABLE IF NOT EXISTS settings(
-        key TEXT PRIMARY KEY,
-        value TEXT
+    CREATE TABLE IF NOT EXISTS media(
+        id SERIAL PRIMARY KEY,
+        type TEXT NOT NULL,
+        file_id TEXT NOT NULL
     )""")
 
 def get_products():
@@ -50,57 +51,40 @@ def get_products():
     return [row[0] for row in rows]
 
 def get_media():
-    row = execute_query("SELECT value FROM settings WHERE key='media_file'", fetch=True)
-    return row[0] if row else None
-
-def set_media(file_id):
-    execute_query("""
-    INSERT INTO settings(key, value)
-    VALUES ('media_file', %s)
-    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-    """, (file_id,))
+    rows = execute_query("SELECT type, file_id FROM media ORDER BY id DESC LIMIT 1", fetch=True)
+    return rows[0] if rows else None
 
 # ================= КЛИЕНТСКАЯ ЧАСТЬ =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     products = get_products()
+    media = get_media()
+
+    if media:
+        media_type, file_id = media
+        try:
+            if media_type == "photo":
+                await update.message.reply_photo(file_id, caption="🛒 Список товаров:")
+            elif media_type == "video":
+                await update.message.reply_video(file_id, caption="🛒 Список товаров:")
+            elif media_type == "animation":
+                await update.message.reply_animation(file_id, caption="🛒 Список товаров:")
+        except Exception as e:
+            await update.message.reply_text(f"⚠️ Ошибка при отправке медиа: {e}")
+
     if not products:
         await update.message.reply_text("Список товаров пуст. Администратор должен его заполнить.")
         return
 
-    media_id = get_media()
-    if media_id:
-        # Автоматически определяем тип файла по user_data["media_type"]
-        media_type_row = execute_query("SELECT value FROM settings WHERE key='media_type'", fetch=True)
-        media_type = media_type_row[0] if media_type_row else "photo"
-
-        if media_type == "video":
-            await update.message.reply_video(video=media_id, caption="🎥 Наши товары")
-        elif media_type == "animation":
-            await update.message.reply_animation(animation=media_id, caption="🎞 Наши товары")
-        else:
-            await update.message.reply_photo(photo=media_id, caption="🛍 Наши товары")
-
     keyboard = [[InlineKeyboardButton(p, callback_data=f"product_{p}")] for p in products]
     keyboard.append([InlineKeyboardButton("📞 Связаться", url="https://t.me/mobilike_com")])
-    await update.message.reply_text("🛒 Список товаров:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("Выберите товар:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def product_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     product = query.data.replace("product_", "")
     context.user_data["product"] = product
-
-    keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel_order")]]
-    await query.edit_message_text(
-        f"Вы выбрали: {product}\n\nВведите свой номер телефона для оформления заказа:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    context.user_data.clear()
-    await query.edit_message_text("❌ Заказ отменён. Вы можете выбрать товар заново командой /start")
+    await query.edit_message_text(f"Вы выбрали: {product}\n\nВведите свой номер телефона для оформления заказа:")
 
 async def phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "product" not in context.user_data:
@@ -115,11 +99,7 @@ async def phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
         (str(user.id), user.username or "", product, phone)
     )
 
-    keyboard = [[InlineKeyboardButton("📞 Связаться с менеджером", url="https://t.me/mobilike_com")]]
-    await update.message.reply_text(
-        f"✅ Ваш заказ на {product} принят!\n📞 Мы свяжемся с вами по номеру: {phone}",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    await update.message.reply_text(f"✅ Ваш заказ на {product} принят! Мы свяжемся с вами по номеру {phone}.")
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=f"📦 Новый заказ!\n👤 @{user.username or user.id}\n🛒 {product}\n📞 Телефон: {phone}"
@@ -135,8 +115,7 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📋 Список товаров", callback_data="list_products")],
         [InlineKeyboardButton("➕ Добавить товар", callback_data="add_product")],
         [InlineKeyboardButton("🗑 Удалить товар", callback_data="remove_product")],
-        [InlineKeyboardButton("📦 Список заказов", callback_data="list_orders")],
-        [InlineKeyboardButton("🖼 Загрузить медиа", callback_data="set_media")],
+        [InlineKeyboardButton("🖼 Загрузить фото/видео/гиф", callback_data="add_media")],
     ]
     await update.message.reply_text("⚙️ Админ-меню:", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -150,21 +129,6 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         text = "📋 Список товаров:\n" + "\n".join(f"• {p}" for p in products) if products else "⚠️ Список пуст."
         await query.edit_message_text(text)
 
-    elif data == "list_orders":
-        orders = execute_query("SELECT id, username, product, phone FROM orders ORDER BY id DESC", fetch=True)
-        if not orders:
-            await query.edit_message_text("⚠️ Заказов пока нет.")
-            return
-
-        text = "📦 Последние заказы:\n\n"
-        keyboard = []
-        for oid, username, product, phone in orders:
-            text += f"🆔 {oid}\n👤 @{username or 'Без ника'}\n🛒 {product}\n📞 {phone}\n\n"
-            keyboard.append([InlineKeyboardButton(f"🗑 Удалить заказ {oid}", callback_data=f"delete_order_{oid}")])
-
-        keyboard.append([InlineKeyboardButton("🔄 Обновить", callback_data="list_orders")])
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-
     elif data == "add_product":
         context.user_data["admin_mode"] = "add_product"
         await query.edit_message_text("✏️ Введите название нового товара:")
@@ -177,47 +141,9 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         keyboard = [[InlineKeyboardButton(f"🗑 {p}", callback_data=f"delete_{p}")] for p in products]
         await query.edit_message_text("Выберите товар для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-    elif data == "set_media":
-        context.user_data["admin_mode"] = "set_media"
-        await query.edit_message_text("📎 Отправьте фото / гиф / видео для заглавного экрана:")
-
-async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка загруженных админом медиафайлов"""
-    if context.user_data.get("admin_mode") != "set_media":
-        return
-
-    file_id = None
-    media_type = None
-
-    if update.message.photo:
-        file_id = update.message.photo[-1].file_id
-        media_type = "photo"
-    elif update.message.video:
-        file_id = update.message.video.file_id
-        media_type = "video"
-    elif update.message.animation:
-        file_id = update.message.animation.file_id
-        media_type = "animation"
-
-    if file_id:
-        set_media(file_id)
-        execute_query("""
-        INSERT INTO settings(key, value)
-        VALUES ('media_type', %s)
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-        """, (media_type,))
-        await update.message.reply_text("✅ Медиа обновлено!")
-    else:
-        await update.message.reply_text("❌ Не удалось определить тип файла, попробуйте снова.")
-
-    context.user_data.pop("admin_mode", None)
-
-async def delete_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    order_id = int(query.data.replace("delete_order_", ""))
-    execute_query("DELETE FROM orders WHERE id = %s", (order_id,))
-    await query.edit_message_text(f"✅ Заказ №{order_id} удалён.")
+    elif data == "add_media":
+        context.user_data["admin_mode"] = "add_media"
+        await query.edit_message_text("📷 Отправьте фото, видео или гиф для главного экрана:")
 
 async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("admin_mode") == "add_product":
@@ -230,6 +156,26 @@ async def add_product_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"✅ Товар «{name}» добавлен!")
         except IntegrityError:
             await update.message.reply_text("❌ Такой товар уже есть.")
+        context.user_data.pop("admin_mode", None)
+
+async def add_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get("admin_mode") == "add_media":
+        if update.message.photo:
+            file_id = update.message.photo[-1].file_id
+            media_type = "photo"
+        elif update.message.video:
+            file_id = update.message.video.file_id
+            media_type = "video"
+        elif update.message.animation:
+            file_id = update.message.animation.file_id
+            media_type = "animation"
+        else:
+            await update.message.reply_text("❌ Отправьте фото, видео или GIF.")
+            return
+
+        execute_query("DELETE FROM media")  # удаляем старое медиа
+        execute_query("INSERT INTO media(type, file_id) VALUES (%s, %s)", (media_type, file_id))
+        await update.message.reply_text(f"✅ {media_type.capitalize()} обновлено!")
         context.user_data.pop("admin_mode", None)
 
 async def remove_product_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -247,24 +193,23 @@ def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin_menu))
+
     app.add_handler(CallbackQueryHandler(product_chosen, pattern="^product_"))
-    app.add_handler(CallbackQueryHandler(cancel_order, pattern="^cancel_order$"))
-    app.add_handler(CallbackQueryHandler(delete_order, pattern="^delete_order_.*$"))
+    app.add_handler(CallbackQueryHandler(admin_menu_handler, pattern="^(list_products|add_product|remove_product|add_media)$"))
+    app.add_handler(CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$"))
 
     async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if context.user_data.get("admin_mode") == "add_product":
             await add_product_name(update, context)
+        elif context.user_data.get("admin_mode") == "add_media":
+            await add_media(update, context)
         elif "product" in context.user_data:
             await phone_received(update, context)
         else:
             await update.message.reply_text("⚠️ Непонятная команда. Используйте /start или /admin")
 
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_router))
-    app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.ANIMATION, handle_media))
-
-    app.add_handler(CommandHandler("admin", admin_menu))
-    app.add_handler(CallbackQueryHandler(admin_menu_handler, pattern="^(list_products|add_product|remove_product|list_orders|set_media)$"))
-    app.add_handler(CallbackQueryHandler(remove_product_handler, pattern="^delete_.*$"))
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, text_router))
 
     print("🚀 Бот запущен! Ожидаем команды...")
     app.run_polling()
